@@ -3,29 +3,40 @@
 	"dependencies": {
 		"gfm": "~>8.0.6",
 		"bindbc-glfw": "~>1.0.0",
-		"erupted": "~>2.1.42+v1.2.192"
+		"erupted": "~>2.1.42+v1.2.192",
+		"expected": "~>0.2.4"
 	},
 	"subConfigurations": {
-		"bindbc-glfw": "static"
+		"bindbc-glfw": "staticBC",
+		"expected" : "betterC"
 	},
-	"dflags-windows": ["--mscrtlib=msvcrt"],
+	"dflags": [
+		"-preview=in",
+		"-preview=dip25",
+		"-preview=dip1000",
+		"-preview=dip1008"
+	],
 	"buildTypes": {
 		"debug-app": {
 			"buildOptions": ["debugMode", "debugInfo"],
-			"libs": ["dependencies/glfw/build/src/Debug/glfw3"]
+			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
+			"dflags-windows": ["--mscrtlib=msvcrtd"]
 		},
 		"release-app": {
 			"buildOptions": ["releaseMode", "optimize", "inline"],
-			"libs": ["dependencies/glfw/build/src/Release/glfw3"]
+			"libs": ["dependencies/glfw/build/src/Release/glfw3"],
+			"dflags-windows": ["--mscrtlib=msvcrt"]
 		},
 		"unittest": {
 			"buildOptions": ["unittests", "debugMode", "debugInfo"],
-			"libs": ["dependencies/glfw/build/src/Debug/glfw3"]
+			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
+			"dflags-windows": ["--mscrtlib=msvcrtd"]
 		},
 		"unittest-opt": 
 		{
 			"buildOptions": ["unittests", "optimize", "inline"],
-			"libs": ["dependencies/glfw/build/src/Release/glfw3"]
+			"libs": ["dependencies/glfw/build/src/Release/glfw3"],
+			"dflags-windows": ["--mscrtlib=msvcrt"]
 		}
 	},
 	"configurations": [

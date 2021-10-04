@@ -4,7 +4,9 @@
 		"bindbc-glfw": "1.0.0",
 		"bindbc-loader": "1.0.1",
 		"erupted": "2.1.42+v1.2.192",
+		"expected": "0.2.4",
 		"gfm": "8.0.6",
-		"intel-intrinsics": "1.6.0"
+		"intel-intrinsics": "1.6.0",
+		"silly": "1.0.2"
 	}
 }
