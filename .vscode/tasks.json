@@ -1,0 +1,41 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"command": "./build_dependencies.sh",
+			"group": "build",
+			"label": "Build dependencies"
+		},
+		{
+			"type": "dub",
+			"run": true,
+			"compiler": "ldc2",
+			"archType": "x86_64",
+			"buildType": "debug-app",
+			"configuration": "application",
+			"_generated": false,
+			"problemMatcher": [
+				"$dmd"
+			],
+			"group": "build",
+			"label": "dub: Run debug learn-vulkan",
+			"detail": "dub run --compiler=ldc2 -a=x86_64 -b=debug-app -c=application"
+		},
+		{
+			"type": "dub",
+			"run": true,
+			"compiler": "ldc2",
+			"archType": "x86_64",
+			"buildType": "release-app",
+			"configuration": "application",
+			"_generated": false,
+			"problemMatcher": [
+				"$dmd"
+			],
+			"group": "build",
+			"label": "dub: Run release learn-vulkan",
+			"detail": "dub run --compiler=ldc2 -a=x86_64 -b=release-app -c=application"
+		}
+	]
+}
