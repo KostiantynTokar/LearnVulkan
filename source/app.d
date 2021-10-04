@@ -2,32 +2,70 @@ import std.stdio;
 import erupted.vulkan_lib_loader;
 import erupted;
 import bindbc.glfw;
+import core.stdc.stdlib;
 
-void main()
+struct HelloTriangleApplication
 {
-    "Hello, World!".writeln;
-
-    if(!loadGlobalLevelFunctions())
+    void run()
     {
-        "Oops".writeln;
-        return;
+        initWindow();
+        initVulkan();
+        mainLoop();
+        cleanup();
     }
 
-    glfwInit();
+private:
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(800, 600, "LearnVulkan", null, null);
-
-    uint extensionCount = 0;
-    vkEnumerateInstanceExtensionProperties(null, &extensionCount, null);
-
-    writeln(extensionCount, " extensions supported");
-
-    while(!glfwWindowShouldClose(window))
+    void initWindow()
     {
-        glfwPollEvents();
+        glfwInit();
+
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        window = glfwCreateWindow(windowWidth, windowHeight, "LearnVulkan", null, null);
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    void initVulkan()
+    {
+        if(!loadGlobalLevelFunctions())
+        {
+            "Oops".writeln;
+            return;
+        }
+    }
+
+    void mainLoop()
+    {
+        while(!glfwWindowShouldClose(window))
+        {
+            glfwPollEvents();
+        }
+    }
+
+    void cleanup()
+    {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+    }
+
+    GLFWwindow* window;
+    enum windowWidth = 800;
+    enum windowHeight = 600;
+}
+
+int main()
+{
+    HelloTriangleApplication app;
+
+    try
+    {
+        app.run();
+    }
+    catch(Exception e)
+    {
+        e.message.writeln();
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
 }
