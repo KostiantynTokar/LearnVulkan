@@ -2,6 +2,9 @@
 	"fileVersion": 1,
 	"versions": {
 		"bindbc-glfw": "1.0.0",
-		"bindbc-loader": "1.0.1"
+		"bindbc-loader": "1.0.1",
+		"erupted": "2.1.42+v1.2.192",
+		"gfm": "8.0.6",
+		"intel-intrinsics": "1.6.0"
 	}
 }

@@ -1,11 +1,14 @@
 {
 	"name": "learn-vulkan",
 	"dependencies": {
-		"bindbc-glfw": "~>1.0.0"
+		"gfm": "~>8.0.6",
+		"bindbc-glfw": "~>1.0.0",
+		"erupted": "~>2.1.42+v1.2.192"
 	},
 	"subConfigurations": {
 		"bindbc-glfw": "static"
 	},
+	"dflags-windows": ["--mscrtlib=msvcrt"],
 	"buildTypes": {
 		"debug-app": {
 			"buildOptions": ["debugMode", "debugInfo"],
@@ -13,16 +16,16 @@
 		},
 		"release-app": {
 			"buildOptions": ["releaseMode", "optimize", "inline"],
-			"libs-windows": ["dependencies/glfw/build/src/Release/glfw3"]
+			"libs": ["dependencies/glfw/build/src/Release/glfw3"]
 		},
 		"unittest": {
 			"buildOptions": ["unittests", "debugMode", "debugInfo"],
-			"libs-windows": ["dependencies/glfw/build/src/Debug/glfw3"]
+			"libs": ["dependencies/glfw/build/src/Debug/glfw3"]
 		},
 		"unittest-opt": 
 		{
 			"buildOptions": ["unittests", "optimize", "inline"],
-			"libs-windows": ["dependencies/glfw/build/src/Release/glfw3"]
+			"libs": ["dependencies/glfw/build/src/Release/glfw3"]
 		}
 	},
 	"configurations": [
