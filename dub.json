@@ -10,6 +10,9 @@
 		"bindbc-glfw": "staticBC",
 		"expected" : "betterC"
 	},
+	"versions": [
+		"GLFW_33"
+	],
 	"dflags": [
 		"-preview=in",
 		"-preview=dip25",

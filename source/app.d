@@ -15,7 +15,7 @@ private:
 
     auto initWindow() nothrow @nogc @trusted
     {
-        import bindbc.glfw : glfwInit, glfwWindowHint, glfwCreateWindow,
+        import glfw_vulkan : glfwInit, glfwWindowHint, glfwCreateWindow,
             GLFW_CLIENT_API, GLFW_NO_API, GLFW_RESIZABLE, GLFW_FALSE;
         import expected : ok;
 
@@ -37,12 +37,42 @@ private:
             return err("Failed to load Vulkan global level functions");
         }
 
+        createInstance();
+
         return ok;
+    }
+
+    auto createInstance() nothrow @nogc @trusted
+    {
+        import erupted : VkApplicationInfo, VkInstanceCreateInfo, vkCreateInstance,
+            VK_MAKE_API_VERSION, VK_API_VERSION_1_0, VK_SUCCESS;
+        import glfw_vulkan : glfwGetRequiredInstanceExtensions;
+        import expected : ok, err;
+
+        VkApplicationInfo appInfo;
+        appInfo.pApplicationName = "Hello Triangle";
+        appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
+        appInfo.pEngineName = "No engine";
+        appInfo.engineVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
+        appInfo.apiVersion = VK_API_VERSION_1_0;
+
+        VkInstanceCreateInfo createInfo;
+        createInfo.pApplicationInfo = &appInfo;
+
+        uint glfwExtensionCount;
+        const(char)** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+        createInfo.enabledExtensionCount = glfwExtensionCount;
+        createInfo.ppEnabledExtensionNames = glfwExtensions;
+
+        createInfo.enabledLayerCount = 0;
+
+        return vkCreateInstance(&createInfo, null, &instance) == VK_SUCCESS ? ok : err("Failed to create VkInstance");
     }
 
     auto mainLoop() nothrow @nogc @trusted
     {
-        import bindbc.glfw : glfwWindowShouldClose, glfwPollEvents;
+        import glfw_vulkan : glfwWindowShouldClose, glfwPollEvents;
         import expected : ok;
 
         while(!glfwWindowShouldClose(window))
@@ -55,7 +85,7 @@ private:
 
     auto cleanup() nothrow @nogc @trusted
     {
-        import bindbc.glfw : glfwDestroyWindow, glfwTerminate;
+        import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
         import expected : ok;
 
         glfwDestroyWindow(window);
@@ -64,9 +94,11 @@ private:
         return ok;
     }
 
-    from!"bindbc.glfw".GLFWwindow* window;
+    from!"glfw_vulkan".GLFWwindow* window;
     enum windowWidth = 800;
     enum windowHeight = 600;
+
+    from!"erupted".VkInstance instance;
 }
 
 void println(string str) nothrow @nogc @safe
@@ -83,7 +115,7 @@ void println(string str) nothrow @nogc @safe
     () @trusted {printf(cStr.ptr);}();
 }
 
-extern(C) int main() nothrow @nogc
+int main() nothrow @nogc
 {
     import core.stdc.stdlib : EXIT_SUCCESS, EXIT_FAILURE;
     import expected : mapOrElse;
