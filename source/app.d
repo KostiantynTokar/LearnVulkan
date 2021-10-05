@@ -6,9 +6,9 @@ struct HelloTriangleApplication
     {
         import expected : andThen;
         return initWindow()
-            .andThen!(t => t.initVulkan())(this)
-            .andThen!(t => t.mainLoop())(this)
-            .andThen!(t => t.cleanup())(this);
+            .andThen!(t => t.initVulkan())(&this)
+            .andThen!(t => t.mainLoop())(&this)
+            .andThen!(t => t.cleanup())(&this);
     }
 
 private:
@@ -30,16 +30,12 @@ private:
     auto initVulkan() nothrow @nogc @trusted
     {
         import erupted.vulkan_lib_loader : loadGlobalLevelFunctions;
-        import expected : ok, err;
+        import erupted : loadInstanceLevelFunctions;
+        import expected : ok, err, andThen;
 
-        if(!loadGlobalLevelFunctions())
-        {
-            return err("Failed to load Vulkan global level functions");
-        }
-
-        createInstance();
-
-        return ok;
+        return (loadGlobalLevelFunctions() ? ok : err("Failed to load Vulkan global level functions"))
+            .andThen!(t => t.createInstance())(&this)
+            .andThen!((t) @trusted { loadInstanceLevelFunctions(t.instance); return ok; })(&this);
     }
 
     auto createInstance() nothrow @nogc @trusted
@@ -76,6 +72,7 @@ private:
             uint extensionCount;
             vkEnumerateInstanceExtensionProperties(null, &extensionCount, null);
             auto extensions = Mallocator.instance.makeArray!VkExtensionProperties(extensionCount);
+            scope(exit) () @trusted { Mallocator.instance.dispose(extensions); }();
             vkEnumerateInstanceExtensionProperties(null, &extensionCount, extensions.ptr);
             printf("Available extensions:\n");
             foreach(ref const extension; extensions)
@@ -104,11 +101,17 @@ private:
 
     auto cleanup() nothrow @nogc @trusted
     {
+        import erupted : vkDestroyInstance;
+        import erupted.vulkan_lib_loader : freeVulkanLib;
         import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
         import expected : ok;
 
+        vkDestroyInstance(instance, null);
+
         glfwDestroyWindow(window);
         glfwTerminate();
+
+        freeVulkanLib();
 
         return ok;
     }
@@ -127,11 +130,11 @@ void println(string str) nothrow @nogc @safe
     import std.stdio : printf;
 
     auto cStr = Mallocator.instance.makeArray!char(str.length + 2);
-    scope(exit) () @trusted {Mallocator.instance.dispose(cStr);}();
+    scope(exit) () @trusted { Mallocator.instance.dispose(cStr); }();
     cStr[0 .. str.length] = str[];
     cStr[str.length] = '\n';
     cStr[str.length + 1] = '\0';
-    () @trusted {printf(cStr.ptr);}();
+    () @trusted { printf(cStr.ptr); }();
 }
 
 int main() nothrow @nogc @safe
@@ -144,5 +147,5 @@ int main() nothrow @nogc @safe
     return app.run()
         .mapOrElse!(
             () => EXIT_SUCCESS,
-            (e) {println(e); return EXIT_FAILURE;});
+            (e) { println(e); return EXIT_FAILURE; });
 }
