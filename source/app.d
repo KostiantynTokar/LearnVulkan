@@ -67,6 +67,25 @@ private:
 
         createInfo.enabledLayerCount = 0;
 
+        version(LearnVulkan_PrintExtensions)
+        () @trusted {
+            import erupted : vkEnumerateInstanceExtensionProperties, VkExtensionProperties;
+            import std.experimental.allocator.mallocator : Mallocator;
+            import std.experimental.allocator : makeArray, dispose;
+            import std.stdio : printf;
+            uint extensionCount;
+            vkEnumerateInstanceExtensionProperties(null, &extensionCount, null);
+            auto extensions = Mallocator.instance.makeArray!VkExtensionProperties(extensionCount);
+            vkEnumerateInstanceExtensionProperties(null, &extensionCount, extensions.ptr);
+            printf("Available extensions:\n");
+            foreach(ref const extension; extensions)
+            {
+                printf("\t");
+                printf(extension.extensionName.ptr);
+                printf("\n");
+            }
+        }();
+
         return vkCreateInstance(&createInfo, null, &instance) == VK_SUCCESS ? ok : err("Failed to create VkInstance");
     }
 
@@ -115,7 +134,7 @@ void println(string str) nothrow @nogc @safe
     () @trusted {printf(cStr.ptr);}();
 }
 
-int main() nothrow @nogc
+int main() nothrow @nogc @safe
 {
     import core.stdc.stdlib : EXIT_SUCCESS, EXIT_FAILURE;
     import expected : mapOrElse;
