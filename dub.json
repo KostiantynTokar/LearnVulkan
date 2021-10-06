@@ -22,6 +22,7 @@
 	"buildTypes": {
 		"debug-app": {
 			"buildOptions": ["debugMode", "debugInfo"],
+			"debugVersions": ["LearnVulkan_ValidationLayers"],
 			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
 			"dflags-windows": ["--mscrtlib=msvcrtd"]
 		},
@@ -32,6 +33,7 @@
 		},
 		"unittest": {
 			"buildOptions": ["unittests", "debugMode", "debugInfo"],
+			"debugVersions": ["LearnVulkan_ValidationLayers"],
 			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
 			"dflags-windows": ["--mscrtlib=msvcrtd"]
 		},
