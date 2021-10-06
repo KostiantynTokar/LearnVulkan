@@ -65,14 +65,6 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
     
     alias Res = TupleCat!(T, Tuple!(VkInstance, "instance"));
 
-    debug(LearnVulkan_ValidationLayers)
-    {
-        if(!checkValidationLayerSupport())
-        {
-            return err!Res("Requested validation layers are not available.");
-        }
-    }
-
     VkApplicationInfo appInfo;
     appInfo.pApplicationName = "Hello Triangle";
     appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
@@ -89,7 +81,19 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
     createInfo.enabledExtensionCount = glfwExtensionCount;
     createInfo.ppEnabledExtensionNames = glfwExtensions;
 
-    createInfo.enabledLayerCount = 0;
+    debug(LearnVulkan_ValidationLayers)
+    {
+        if(!checkValidationLayerSupport())
+        {
+            return err!Res("Requested validation layers are not available.");
+        }
+        createInfo.enabledLayerCount = ValidationLayers.length;
+        createInfo.ppEnabledLayerNames = ValidationLayers.ptr;
+    }
+    else
+    {
+        createInfo.enabledLayerCount = 0;
+    }
 
     version(LearnVulkan_PrintExtensions)
     () @trusted {
@@ -120,10 +124,11 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
 
 debug(LearnVulkan_ValidationLayers)
 {
+    static immutable char*[] ValidationLayers = ["VK_LAYER_KHRONOS_validation"];
+
     bool checkValidationLayerSupport() nothrow @nogc @trusted
     {
-        import util : strcmp;
-        import core.stdc.string : strncmp;
+        import core.stdc.string : strcmp;
         import erupted : vkEnumerateInstanceLayerProperties, VkLayerProperties;
         import std.experimental.allocator.mallocator : Mallocator;
         import std.experimental.allocator : makeArray, dispose;
@@ -134,9 +139,7 @@ debug(LearnVulkan_ValidationLayers)
         scope(exit) () @trusted { Mallocator.instance.dispose(availableLayers); }();
         vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.ptr);
 
-        static immutable validationLayers = ["VK_LAYER_KHRONOS_validation"];
-
-        foreach (ref const layerName; validationLayers)
+        foreach (ref const layerName; ValidationLayers)
         {
             auto layerFound = false;
 
