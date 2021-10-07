@@ -55,19 +55,10 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
     import erupted : loadInstanceLevelFunctions;
     import expected : ok, err, andThen;
 
-    auto res = (loadGlobalLevelFunctions() ? ok(forward!arg) : err!T("Failed to load Vulkan global level functions."))
+    return (loadGlobalLevelFunctions() ? ok(forward!arg) : err!T("Failed to load Vulkan global level functions."))
         .andThen!createInstance
-        .andThen!((auto ref t) @trusted { loadInstanceLevelFunctions(t.instance); return ok(forward!t); });
-    
-    debug(LearnVulkan_ValidationLayers)
-    {
-        return res.move
-            .andThen!setupDebugMessanger;
-    }
-    else
-    {
-        return res;
-    }
+        .andThen!((auto ref t) @trusted { loadInstanceLevelFunctions(t.instance); return ok(forward!t); })
+        .andThenSetupDebugMessenger;
 }
 
 auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
@@ -112,7 +103,7 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
         createInfo.enabledLayerCount = ValidationLayers.length;
         createInfo.ppEnabledLayerNames = ValidationLayers.ptr;
 
-        auto debugCreateInfo = defaultDebugMessengerCreateInfo();
+        immutable debugCreateInfo = defaultDebugMessengerCreateInfo();
         createInfo.pNext = &debugCreateInfo;
     }
     else
@@ -224,7 +215,7 @@ debug(LearnVulkan_ValidationLayers)
         return createInfo;
     }
 
-    auto ref setupDebugMessanger(T)(auto ref T arg) nothrow @nogc @trusted
+    auto ref setupDebugMessenger(T)(auto ref T arg) nothrow @nogc @trusted
         if(from!"std.typecons".isTuple!T
             && is(typeof(arg.instance) : from!"erupted".VkInstance))
     {
@@ -243,6 +234,20 @@ debug(LearnVulkan_ValidationLayers)
         return vkCreateDebugUtilsMessengerEXT(arg.instance, &createInfo, null, &debugMessenger) == VK_SUCCESS
             ? ok(Res(forward!arg.expand, debugMessenger.move))
             : err!Res("Failed to create debug messenger.");
+    }
+}
+
+auto ref andThenSetupDebugMessenger(Exp)(auto ref Exp exp) nothrow @nogc @safe
+{
+    debug(LearnVulkan_ValidationLayers)
+    {
+        import core.lifetime : forward;
+        import expected : andThen;
+        return forward!exp.andThen!setupDebugMessenger;
+    }
+    else
+    {
+        return exp;
     }
 }
 
