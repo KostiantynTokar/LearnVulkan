@@ -24,24 +24,24 @@
 			"buildOptions": ["debugMode", "debugInfo"],
 			"debugVersions": ["LearnVulkan_ValidationLayers"],
 			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
-			"dflags-windows": ["--mscrtlib=msvcrtd"]
+			"dflags-windows-ldc": ["--mscrtlib=msvcrtd"]
 		},
 		"release-app": {
 			"buildOptions": ["releaseMode", "optimize", "inline"],
 			"libs": ["dependencies/glfw/build/src/Release/glfw3"],
-			"dflags-windows": ["--mscrtlib=msvcrt"]
+			"dflags-windows-ldc": ["--mscrtlib=msvcrt"]
 		},
 		"unittest": {
 			"buildOptions": ["unittests", "debugMode", "debugInfo"],
 			"debugVersions": ["LearnVulkan_ValidationLayers"],
 			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
-			"dflags-windows": ["--mscrtlib=msvcrtd"]
+			"dflags-windows-ldc": ["--mscrtlib=msvcrtd"]
 		},
 		"unittest-opt": 
 		{
 			"buildOptions": ["unittests", "optimize", "inline"],
 			"libs": ["dependencies/glfw/build/src/Release/glfw3"],
-			"dflags-windows": ["--mscrtlib=msvcrt"]
+			"dflags-windows-ldc": ["--mscrtlib=msvcrt"]
 		}
 	},
 	"configurations": [
