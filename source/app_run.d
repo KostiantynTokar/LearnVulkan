@@ -111,10 +111,14 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
         }
         createInfo.enabledLayerCount = ValidationLayers.length;
         createInfo.ppEnabledLayerNames = ValidationLayers.ptr;
+
+        auto debugCreateInfo = defaultDebugMessengerCreateInfo();
+        createInfo.pNext = &debugCreateInfo;
     }
     else
     {
         createInfo.enabledLayerCount = 0;
+        createInfo.pNext = null;
     }
 
     version(LearnVulkan_PrintExtensions)
@@ -202,6 +206,22 @@ debug(LearnVulkan_ValidationLayers)
         return true;
     }
 
+    auto defaultDebugMessengerCreateInfo() pure nothrow @nogc @trusted
+    {
+        from!"erupted".VkDebugUtilsMessengerCreateInfoEXT createInfo;
+        createInfo.messageSeverity
+            = from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        createInfo.messageType
+            = from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        createInfo.pfnUserCallback = &debugCallback;
+        createInfo.pUserData = null;
+        return createInfo;
+    }
+
     auto ref setupDebugMessanger(T)(auto ref T arg) nothrow @nogc @trusted
         if(from!"std.typecons".isTuple!T
             && is(typeof(arg.instance) : from!"erupted".VkInstance))
@@ -209,27 +229,12 @@ debug(LearnVulkan_ValidationLayers)
         import util : TupleCat;
         import core.lifetime : forward, move;
         import std.typecons : Tuple;
-        import erupted : VkDebugUtilsMessengerCreateInfoEXT, vkCreateDebugUtilsMessengerEXT, VkDebugUtilsMessengerEXT,
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT,
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-            VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
-            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
-            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-            VK_SUCCESS;
+        import erupted : vkCreateDebugUtilsMessengerEXT, VkDebugUtilsMessengerEXT, VK_SUCCESS;
         import expected : ok, err;
         
         alias Res = TupleCat!(T, Tuple!(VkDebugUtilsMessengerEXT, "debugMessenger"));
 
-        VkDebugUtilsMessengerCreateInfoEXT createInfo;
-        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
-            | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-            | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
-            | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
-            | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-        createInfo.pfnUserCallback = &debugCallback;
-        createInfo.pUserData = null;
+        auto createInfo = defaultDebugMessengerCreateInfo();
 
         VkDebugUtilsMessengerEXT debugMessenger;
 
