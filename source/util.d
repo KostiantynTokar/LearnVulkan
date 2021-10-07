@@ -2,6 +2,11 @@ module util;
 
 import from : from;
 
+bool implies(in bool antecedent, in bool consequent) pure nothrow @nogc @safe
+{
+    return (!antecedent) || consequent;
+}
+
 template TupleCat(Ts...)
     if(from!"std.meta".allSatisfy!(from!"std.typecons".isTuple, Ts))
 {

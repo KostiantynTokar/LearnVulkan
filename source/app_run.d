@@ -14,6 +14,15 @@ auto ref run() nothrow @nogc @safe
 
 private:
 
+debug(LearnVulkan_ValidationLayers)
+{
+    enum ValidationLayersEnabled = true;
+}
+else
+{
+    enum ValidationLayersEnabled = false;
+}
+
 enum WindowWidth = 800;
 enum WindowHeight = 600;
 
@@ -40,15 +49,25 @@ auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
 auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T)
 {
-    import core.lifetime : forward;
+    import core.lifetime : forward, move;
     import std.meta : AliasSeq;
     import erupted.vulkan_lib_loader : loadGlobalLevelFunctions;
     import erupted : loadInstanceLevelFunctions;
     import expected : ok, err, andThen;
 
-    return (loadGlobalLevelFunctions() ? ok(forward!arg) : err!T("Failed to load Vulkan global level functions."))
+    auto res = (loadGlobalLevelFunctions() ? ok(forward!arg) : err!T("Failed to load Vulkan global level functions."))
         .andThen!createInstance
         .andThen!((auto ref t) @trusted { loadInstanceLevelFunctions(t.instance); return ok(forward!t); });
+    
+    debug(LearnVulkan_ValidationLayers)
+    {
+        return res.move
+            .andThen!setupDebugMessanger;
+    }
+    else
+    {
+        return res;
+    }
 }
 
 auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
@@ -58,6 +77,8 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.meta : AliasSeq;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import std.experimental.allocator : makeArray, dispose;
     import erupted : VkApplicationInfo, VkInstanceCreateInfo, vkCreateInstance, VkInstance,
         VK_MAKE_API_VERSION, VK_API_VERSION_1_0, VK_SUCCESS;
     import glfw_vulkan : glfwGetRequiredInstanceExtensions;
@@ -75,11 +96,12 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
     VkInstanceCreateInfo createInfo;
     createInfo.pApplicationInfo = &appInfo;
 
-    uint glfwExtensionCount;
-    const(char)** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    auto extensionNamesRange = getRequiredExtensions();
+    auto extensions = Mallocator.instance.makeArray!(const(char)*)(extensionNamesRange);
+    scope(exit) () @trusted { Mallocator.instance.dispose(extensions); }();
 
-    createInfo.enabledExtensionCount = glfwExtensionCount;
-    createInfo.ppEnabledExtensionNames = glfwExtensions;
+    createInfo.enabledExtensionCount = cast(uint) extensions.length;
+    createInfo.ppEnabledExtensionNames = extensions.ptr;
 
     debug(LearnVulkan_ValidationLayers)
     {
@@ -122,6 +144,25 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
         : err!Res("Failed to create VkInstance.");
 }
 
+auto getRequiredExtensions() nothrow @nogc @trusted
+{
+    import std.range : only, chain;
+    import erupted : VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+    import glfw_vulkan : glfwGetRequiredInstanceExtensions;
+
+    uint glfwExtensionCount;
+    const(char)** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    debug(LearnVulkan_ValidationLayers)
+    {
+        static immutable name = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+        return chain(glfwExtensions[0 .. glfwExtensionCount], only(name.ptr));
+    }
+    else
+    {
+        return glfwExtensions[0 .. glfwExtensionCount];
+    }
+}
+
 debug(LearnVulkan_ValidationLayers)
 {
     static immutable char*[] ValidationLayers = ["VK_LAYER_KHRONOS_validation"];
@@ -160,6 +201,58 @@ debug(LearnVulkan_ValidationLayers)
 
         return true;
     }
+
+    auto ref setupDebugMessanger(T)(auto ref T arg) nothrow @nogc @trusted
+        if(from!"std.typecons".isTuple!T
+            && is(typeof(arg.instance) : from!"erupted".VkInstance))
+    {
+        import util : TupleCat;
+        import core.lifetime : forward, move;
+        import std.typecons : Tuple;
+        import erupted : VkDebugUtilsMessengerCreateInfoEXT, vkCreateDebugUtilsMessengerEXT, VkDebugUtilsMessengerEXT,
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT,
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+            VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
+            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
+            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+            VK_SUCCESS;
+        import expected : ok, err;
+        
+        alias Res = TupleCat!(T, Tuple!(VkDebugUtilsMessengerEXT, "debugMessenger"));
+
+        VkDebugUtilsMessengerCreateInfoEXT createInfo;
+        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+            | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+            | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+            | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+            | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        createInfo.pfnUserCallback = &debugCallback;
+        createInfo.pUserData = null;
+
+        VkDebugUtilsMessengerEXT debugMessenger;
+
+        return vkCreateDebugUtilsMessengerEXT(arg.instance, &createInfo, null, &debugMessenger) == VK_SUCCESS
+            ? ok(Res(forward!arg.expand, debugMessenger.move))
+            : err!Res("Failed to create debug messenger.");
+    }
+}
+
+extern(System) from!"erupted".VkBool32 debugCallback(
+    from!"erupted".VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+    from!"erupted".VkDebugUtilsMessageTypeFlagsEXT messageType,
+    const(from!"erupted".VkDebugUtilsMessengerCallbackDataEXT)* pCallbackData,
+    void* pUserData) nothrow @nogc
+{
+    import core.stdc.stdio : fprintf, stderr;
+    import erupted : VK_FALSE;
+
+    fprintf(stderr, "Validation layer: ");
+    fprintf(stderr, pCallbackData.pMessage);
+    fprintf(stderr, "\n");
+
+    return VK_FALSE;
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
@@ -181,7 +274,9 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
 auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
-        && is(typeof(arg.instance) : from!"erupted".VkInstance))
+        && is(typeof(arg.instance) : from!"erupted".VkInstance)
+        && from!"util".implies(ValidationLayersEnabled,
+            is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT)))
 {
     import util : erase;
     import core.lifetime : forward;
@@ -190,6 +285,12 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
 
+    debug(LearnVulkan_ValidationLayers)
+    {
+        import erupted : vkDestroyDebugUtilsMessengerEXT;
+        vkDestroyDebugUtilsMessengerEXT(arg.instance, arg.debugMessenger, null);
+    }
+
     vkDestroyInstance(arg.instance, null);
 
     glfwDestroyWindow(arg.window);
@@ -197,5 +298,12 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 
     freeVulkanLib();
 
-    return ok(forward!arg.erase!("window", "instance"));
+    debug(LearnVulkan_ValidationLayers)
+    {
+        return ok(forward!arg.erase!("window", "instance", "debugMessenger"));
+    }
+    else
+    {
+        return ok(forward!arg.erase!("window", "instance"));
+    }
 }
