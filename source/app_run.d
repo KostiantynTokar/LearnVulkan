@@ -58,7 +58,8 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
     return (loadGlobalLevelFunctions() ? ok(forward!arg) : err!T("Failed to load Vulkan global level functions."))
         .andThen!createInstance
         .andThen!((auto ref t) @trusted { loadInstanceLevelFunctions(t.instance); return ok(forward!t); })
-        .andThenSetupDebugMessenger;
+        .andThenSetupDebugMessenger
+        .andThen!pickPhysicalDevice;
 }
 
 auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
@@ -265,6 +266,100 @@ extern(System) from!"erupted".VkBool32 debugCallback(
     fprintf(stderr, "\n");
 
     return VK_FALSE;
+}
+
+bool isDeviceSuitable(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
+{
+    // from!"erupted".VkPhysicalDeviceProperties deviceProperties;
+    // from!"erupted".vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+    // from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
+    // from!"erupted".vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+    immutable indices = findQueueFamilies(device);
+
+    return indices.isComplete();
+}
+
+struct QueueFamilyIndices
+{
+    from!"optional".Optional!uint graphicsFamily;
+
+    bool isComplete() const pure nothrow @nogc @safe
+    {
+        return !graphicsFamily.empty;
+    }
+}
+
+QueueFamilyIndices findQueueFamilies(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
+{
+    import std.experimental.allocator.mallocator : Mallocator;
+    import std.experimental.allocator : makeArray, dispose;
+    import erupted : VkQueueFamilyProperties, vkGetPhysicalDeviceQueueFamilyProperties,
+        VK_QUEUE_GRAPHICS_BIT;
+    
+    QueueFamilyIndices indices;
+    
+    uint queueFamilyCount;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, null);
+    auto queueFamilies = Mallocator.instance.makeArray!VkQueueFamilyProperties(queueFamilyCount);
+    scope(exit) () @trusted { Mallocator.instance.dispose(queueFamilies); }();
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.ptr);
+
+    foreach(i, const ref queueFamily; queueFamilies)
+    {
+        if(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        {
+           indices.graphicsFamily = cast(uint) i;
+        }
+
+        if(indices.isComplete) break;
+    }
+
+    return indices;
+}
+
+auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.instance) : from!"erupted".VkInstance))
+{
+    import util : TupleCat;
+    import core.lifetime : forward;
+    import std.typecons : Tuple;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import std.experimental.allocator : makeArray, dispose;
+    import erupted : VkPhysicalDevice, vkEnumeratePhysicalDevices, VK_NULL_HANDLE;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(VkPhysicalDevice, "physicalDevice"));
+    
+    uint deviceCount;
+    vkEnumeratePhysicalDevices(arg.instance, &deviceCount, null);
+
+    if(deviceCount == 0)
+    {
+        return err!Res("Failed to find GPU with Vulkan support.");
+    }
+
+    auto devices = Mallocator.instance.makeArray!VkPhysicalDevice(deviceCount);
+    scope(exit) () @trusted { Mallocator.instance.dispose(devices); }();
+
+    vkEnumeratePhysicalDevices(arg.instance, &deviceCount, devices.ptr);
+
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
+    foreach (device; devices)
+    {
+        if(device.isDeviceSuitable)
+        {
+            physicalDevice = device;
+            break;
+        }
+    }
+
+    return physicalDevice != VK_NULL_HANDLE
+        ? ok(Res(forward!arg.expand, physicalDevice))
+        : err!Res("Failed to find suitable GPU.");
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted

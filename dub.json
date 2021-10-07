@@ -4,7 +4,8 @@
 		"gfm": "~>8.0.6",
 		"bindbc-glfw": "~>1.0.0",
 		"erupted": "~>2.1.42+v1.2.192",
-		"expected": "~>0.2.4"
+		"expected": "~>0.2.4",
+		"optional": "~>1.2.1"
 	},
 	"subConfigurations": {
 		"bindbc-glfw": "staticBC",

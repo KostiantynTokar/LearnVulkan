@@ -7,6 +7,6 @@ int main() nothrow @nogc @safe
 
     return run()
         .mapOrElse!(
-            (t) { static assert(t.Types.length == 0); return EXIT_SUCCESS; },
+            (t) { return EXIT_SUCCESS; },
             (e) { println(e); return EXIT_FAILURE; });
 }
