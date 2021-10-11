@@ -69,6 +69,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
         .andThen!getDeviceQueues
         .andThen!createSwapChain
+        .andThen!getSwapChainImages
         ;
 }
 
@@ -686,10 +687,14 @@ auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
     import util : TupleCat;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
-    import erupted : VkSwapchainKHR;
+    import erupted : VkSwapchainKHR, VkFormat, VkExtent2D;
     import expected : ok, err;
 
-    alias Res = TupleCat!(T, Tuple!(VkSwapchainKHR, "swapChain"));
+    alias Res = TupleCat!(T, Tuple!(
+        VkSwapchainKHR, "swapChain",
+        VkFormat, "swapChainImageFormat",
+        VkExtent2D, "swapChainExtent",
+        ));
 
     from!"erupted".VkSwapchainCreateInfoKHR createInfo;
 
@@ -732,8 +737,33 @@ auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
 
     VkSwapchainKHR swapChain;
     return from!"erupted".vkCreateSwapchainKHR(arg.device, &createInfo, null, &swapChain) == from!"erupted".VK_SUCCESS
-        ? ok(Res(forward!arg.expand, swapChain.move))
+        ? ok(Res(forward!arg.expand, swapChain.move, createInfo.imageFormat.move, createInfo.imageExtent.move))
         : err!Res("Failed to create swap chain.");
+}
+
+auto ref getSwapChainImages(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import erupted : vkGetSwapchainImagesKHR;
+    import expected : ok;
+    import automem : Vector;
+    
+    alias VectorType = Vector!(from!"erupted".VkImage, Mallocator);
+    alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainImages"));
+
+    VectorType swapChainImages;
+    uint imageCount;
+    vkGetSwapchainImagesKHR(arg.device, arg.swapChain, &imageCount, null);
+    swapChainImages.length = imageCount;
+    vkGetSwapchainImagesKHR(arg.device, arg.swapChain, &imageCount, swapChainImages.ptr);
+    return ok(Res(forward!arg.expand, swapChainImages.move));
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
