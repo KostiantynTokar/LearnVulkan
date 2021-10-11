@@ -15,6 +15,8 @@ auto ref run() nothrow @nogc @safe
 
 private:
 
+static immutable char*[] deviceExtensions = [from!"erupted".VK_KHR_SWAPCHAIN_EXTENSION_NAME];
+
 debug(LearnVulkan_ValidationLayers)
 {
     enum validationLayersEnabled = true;
@@ -368,6 +370,41 @@ from!"optional".Optional!QueueFamilyIndices findQueueFamilies
     return indices;
 }
 
+bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
+{
+    import core.stdc.string : strcmp;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import std.experimental.allocator : makeArray, dispose;
+    import erupted : vkEnumerateDeviceExtensionProperties, VkExtensionProperties;
+
+    uint extensionCount;
+    vkEnumerateDeviceExtensionProperties(device, null, &extensionCount, null);
+    auto availableExtensions = Mallocator.instance.makeArray!VkExtensionProperties(extensionCount);
+    scope(exit) () @trusted { Mallocator.instance.dispose(availableExtensions); }();
+    vkEnumerateDeviceExtensionProperties(device, null, &extensionCount, availableExtensions.ptr);
+
+    foreach (ref const extensionName; deviceExtensions)
+    {
+        auto extensionFound = false;
+
+        foreach (ref const extensionProperties; availableExtensions)
+        {
+            if(strcmp(extensionName, extensionProperties.extensionName.ptr) == 0)
+            {
+                extensionFound = true;
+                break;
+            }
+        }
+
+        if(!extensionFound)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.instance) : from!"erupted".VkInstance)
@@ -402,6 +439,10 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     return devices.zip(arg.repeat)
         .map!((elem)
         {
+            if(!checkDeviceExtensionSupport(elem[0]))
+            {
+                return err!Res("Failed to find suitable GPU.");
+            }
             immutable indices = findQueueFamilies(elem[0], elem[1].surface);
             return indices.match!(
                 q => ok(Res(elem[1].expand, elem[0], q)),
