@@ -8,8 +8,7 @@
 		"optional": "~>1.2.1"
 	},
 	"subConfigurations": {
-		"bindbc-glfw": "staticBC",
-		"expected" : "betterC"
+		"bindbc-glfw": "staticBC"
 	},
 	"versions": [
 		"GLFW_33"

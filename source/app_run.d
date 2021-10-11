@@ -64,7 +64,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!pickPhysicalDevice
         .andThen!createLogicalDevice
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
-        .andThen!getDeviceQueue
+        .andThen!getDeviceQueues
         ;
 }
 
@@ -421,26 +421,33 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     import util : TupleCat;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
-    import std.experimental.allocator.mallocator : Mallocator;
-    import std.experimental.allocator : makeArray, dispose;
+    import std.algorithm : sort, uniq;
     import erupted : VkDevice;
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(VkDevice, "device"));
 
-    from!"erupted".VkDeviceQueueCreateInfo queueCreateInfo;
-    queueCreateInfo.queueFamilyIndex = arg.queueFamilyIndices.graphicsFamily;
-    queueCreateInfo.queueCount = 1;
+    enum queuesCount = arg.queueFamilyIndices.tupleof.length;
 
+    from!"erupted".VkDeviceQueueCreateInfo[queuesCount] queueCreateInfos;
+    uint[queuesCount] queueFamilies = [arg.queueFamilyIndices.tupleof];
     immutable queuePriority = 1.0f;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    uint uniqueFamiliesCount = 0;
+    // TODO: sort requieres expected ModuleInfo? Breaks betterC.
+    foreach(queueFamily; queueFamilies[].sort.uniq)
+    {
+        queueCreateInfos[uniqueFamiliesCount].queueFamilyIndex = queueFamily;
+        queueCreateInfos[uniqueFamiliesCount].queueCount = 1;
+        queueCreateInfos[uniqueFamiliesCount].pQueuePriorities = &queuePriority;
+        ++uniqueFamiliesCount;
+    }
 
     from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
 
     from!"erupted".VkDeviceCreateInfo createInfo;
 
-    createInfo.pQueueCreateInfos = &queueCreateInfo;
-    createInfo.queueCreateInfoCount = 1;
+    createInfo.pQueueCreateInfos = queueCreateInfos.ptr;
+    createInfo.queueCreateInfoCount = uniqueFamiliesCount;
 
     createInfo.pEnabledFeatures = &deviceFeatures;
 
@@ -463,7 +470,7 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
         : err!Res("Failed to create logical device.");
 }
 
-auto ref getDeviceQueue(T)(auto ref T arg) nothrow @nogc @trusted
+auto ref getDeviceQueues(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
@@ -474,11 +481,15 @@ auto ref getDeviceQueue(T)(auto ref T arg) nothrow @nogc @trusted
     import std.typecons : Tuple;
     import erupted : VkQueue, vkGetDeviceQueue;
 
-    alias Res = TupleCat!(T, Tuple!(VkQueue, "graphicsQueue"));
+    alias Res = TupleCat!(T, Tuple!(VkQueue, "graphicsQueue", VkQueue, "presentQueue"));
 
     VkQueue graphicsQueue;
     vkGetDeviceQueue(arg.device, arg.queueFamilyIndices.graphicsFamily, 0, &graphicsQueue);
-    return from!"expected".ok(Res(forward!arg.expand, graphicsQueue.move));
+
+    VkQueue presentQueue;
+    vkGetDeviceQueue(arg.device, arg.queueFamilyIndices.presentFamily, 0, &presentQueue);
+
+    return from!"expected".ok(Res(forward!arg.expand, graphicsQueue.move, presentQueue.move));
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
