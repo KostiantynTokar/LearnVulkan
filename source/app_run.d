@@ -70,6 +70,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!getDeviceQueues
         .andThen!createSwapChain
         .andThen!getSwapChainImages
+        .andThen!createImageViews
         ;
 }
 
@@ -246,6 +247,21 @@ debug(LearnVulkan_ValidationLayers)
             ? ok(Res(forward!arg.expand, debugMessenger.move))
             : err!Res("Failed to create debug messenger.");
     }
+
+    extern(System) from!"erupted".VkBool32 debugCallback(
+        from!"erupted".VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+        from!"erupted".VkDebugUtilsMessageTypeFlagsEXT messageType,
+        const(from!"erupted".VkDebugUtilsMessengerCallbackDataEXT)* pCallbackData,
+        void* pUserData) nothrow @nogc
+    {
+        import core.stdc.stdio : fprintf, stderr;
+        import erupted : VK_FALSE;
+
+        fprintf(stderr, pCallbackData.pMessage);
+        fprintf(stderr, "\n");
+
+        return VK_FALSE;
+    }
 }
 
 auto ref andThenSetupDebugMessenger(Exp)(auto ref Exp exp) nothrow @nogc @safe
@@ -260,22 +276,6 @@ auto ref andThenSetupDebugMessenger(Exp)(auto ref Exp exp) nothrow @nogc @safe
     {
         return exp;
     }
-}
-
-extern(System) from!"erupted".VkBool32 debugCallback(
-    from!"erupted".VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-    from!"erupted".VkDebugUtilsMessageTypeFlagsEXT messageType,
-    const(from!"erupted".VkDebugUtilsMessengerCallbackDataEXT)* pCallbackData,
-    void* pUserData) nothrow @nogc
-{
-    import core.stdc.stdio : fprintf, stderr;
-    import erupted : VK_FALSE;
-
-    fprintf(stderr, "Validation layer: ");
-    fprintf(stderr, pCallbackData.pMessage);
-    fprintf(stderr, "\n");
-
-    return VK_FALSE;
 }
 
 auto ref createSurface(T)(auto ref T arg) nothrow @nogc @trusted
@@ -766,6 +766,55 @@ auto ref getSwapChainImages(T)(auto ref T arg) nothrow @nogc @trusted
     return ok(Res(forward!arg.expand, swapChainImages.move));
 }
 
+auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import std.range : enumerate;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import expected : ok, err;
+    import automem : Vector;
+
+    alias VectorType = Vector!(from!"erupted".VkImageView, Mallocator);
+    alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainImageViews"));
+
+    VectorType swapChainImageViews;
+    swapChainImageViews.length = arg.swapChainImages.length;
+
+    foreach(i, ref image; arg.swapChainImages[].enumerate)
+    {
+        from!"erupted".VkImageViewCreateInfo createInfo;
+        createInfo.image = image;
+        createInfo.viewType = from!"erupted".VK_IMAGE_VIEW_TYPE_2D;
+        createInfo.format = arg.swapChainImageFormat;
+
+        createInfo.components.r = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.g = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.b = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.a = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
+
+        createInfo.subresourceRange.aspectMask = from!"erupted".VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        // More then 1 for stereographic 3D application.
+        createInfo.subresourceRange.layerCount = 1;
+
+        if(from!"erupted".vkCreateImageView(arg.device, &createInfo, null, &swapChainImageViews.ptr[i])
+            != from!"erupted".VK_SUCCESS)
+        {
+            return err!Res("Failed to create image view.");
+        }
+    }
+
+    return ok(Res(forward!arg.expand, swapChainImageViews.move));
+}
+
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
@@ -792,6 +841,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
             is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
         )
 {
     import util : erase;
@@ -800,6 +850,11 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
+
+    foreach(ref imageView; arg.swapChainImageViews)
+    {
+        from!"erupted".vkDestroyImageView(arg.device, imageView, null);
+    }
 
     from!"erupted".vkDestroySwapchainKHR(arg.device, arg.swapChain, null);
     from!"erupted".vkDestroyDevice(arg.device, null);
