@@ -9,7 +9,8 @@ auto ref run() nothrow @nogc @safe
     return initWindow(tuple())
         .andThen!initVulkan
         .andThen!mainLoop
-        .andThen!cleanup;
+        .andThen!cleanup
+        ;
 }
 
 private:
@@ -52,14 +53,17 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
     import core.lifetime : forward, move;
     import std.meta : AliasSeq;
     import erupted.vulkan_lib_loader : loadGlobalLevelFunctions;
-    import erupted : loadInstanceLevelFunctions;
+    import erupted : loadInstanceLevelFunctions, loadDeviceLevelFunctions;
     import expected : ok, err, andThen;
 
     return (loadGlobalLevelFunctions() ? ok(forward!arg) : err!T("Failed to load Vulkan global level functions."))
         .andThen!createInstance
         .andThen!((auto ref t) @trusted { loadInstanceLevelFunctions(t.instance); return ok(forward!t); })
         .andThenSetupDebugMessenger
-        .andThen!pickPhysicalDevice;
+        .andThen!pickPhysicalDevice
+        .andThen!createLogicalDevice
+        .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
+        ;
 }
 
 auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
@@ -218,7 +222,8 @@ debug(LearnVulkan_ValidationLayers)
 
     auto ref setupDebugMessenger(T)(auto ref T arg) nothrow @nogc @trusted
         if(from!"std.typecons".isTuple!T
-            && is(typeof(arg.instance) : from!"erupted".VkInstance))
+            && is(typeof(arg.instance) : from!"erupted".VkInstance)
+            )
     {
         import util : TupleCat;
         import core.lifetime : forward, move;
@@ -276,29 +281,25 @@ bool isDeviceSuitable(from!"erupted".VkPhysicalDevice device) nothrow @nogc @tru
     // from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
     // from!"erupted".vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
 
+    import optional : match;
+
     immutable indices = findQueueFamilies(device);
 
-    return indices.isComplete();
+    return indices.match!(v => true, () => false);
 }
 
 struct QueueFamilyIndices
 {
-    from!"optional".Optional!uint graphicsFamily;
-
-    bool isComplete() const pure nothrow @nogc @safe
-    {
-        return !graphicsFamily.empty;
-    }
+    uint graphicsFamily;
 }
 
-QueueFamilyIndices findQueueFamilies(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
+from!"optional".Optional!QueueFamilyIndices findQueueFamilies(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
 {
     import std.experimental.allocator.mallocator : Mallocator;
     import std.experimental.allocator : makeArray, dispose;
     import erupted : VkQueueFamilyProperties, vkGetPhysicalDeviceQueueFamilyProperties,
         VK_QUEUE_GRAPHICS_BIT;
-    
-    QueueFamilyIndices indices;
+    import optional : Optional, match, some, none;
     
     uint queueFamilyCount;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, null);
@@ -306,14 +307,21 @@ QueueFamilyIndices findQueueFamilies(from!"erupted".VkPhysicalDevice device) not
     scope(exit) () @trusted { Mallocator.instance.dispose(queueFamilies); }();
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.ptr);
 
+    Optional!QueueFamilyIndices indices;
+    Optional!uint optGraphicsFamily;
+
     foreach(i, const ref queueFamily; queueFamilies)
     {
         if(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
         {
-           indices.graphicsFamily = cast(uint) i;
+           optGraphicsFamily = cast(uint) i;
         }
 
-        if(indices.isComplete) break;
+        indices = optGraphicsFamily.match!(
+            graphicsFamily => some(QueueFamilyIndices(graphicsFamily)),
+            () => Optional!QueueFamilyIndices()
+        );
+        if(!indices.empty) break;
     }
 
     return indices;
@@ -321,17 +329,21 @@ QueueFamilyIndices findQueueFamilies(from!"erupted".VkPhysicalDevice device) not
 
 auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.instance) : from!"erupted".VkInstance))
+        && is(typeof(arg.instance) : from!"erupted".VkInstance)
+        )
 {
     import util : TupleCat;
     import core.lifetime : forward;
     import std.typecons : Tuple;
+    import std.range : zip, repeat, takeOne;
+    import std.algorithm : map, fold;
     import std.experimental.allocator.mallocator : Mallocator;
     import std.experimental.allocator : makeArray, dispose;
     import erupted : VkPhysicalDevice, vkEnumeratePhysicalDevices, VK_NULL_HANDLE;
-    import expected : ok, err;
+    import expected : ok, err, orElse;
+    import optional : Optional, match;
 
-    alias Res = TupleCat!(T, Tuple!(VkPhysicalDevice, "physicalDevice"));
+    alias Res = TupleCat!(T, Tuple!(VkPhysicalDevice, "physicalDevice", QueueFamilyIndices, "queueFamilyIndices"));
     
     uint deviceCount;
     vkEnumeratePhysicalDevices(arg.instance, &deviceCount, null);
@@ -346,25 +358,73 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
 
     vkEnumeratePhysicalDevices(arg.instance, &deviceCount, devices.ptr);
 
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-
-    foreach (device; devices)
-    {
-        if(device.isDeviceSuitable)
+    return devices.zip(arg.repeat)
+        .map!((elem)
         {
-            physicalDevice = device;
-            break;
-        }
+            immutable indices = findQueueFamilies(elem[0]);
+            return indices.match!(
+                q => ok(Res(elem[1].expand, elem[0], q)),
+                () => err!Res("Failed to find suitable GPU."));
+        })
+        .fold!((prev, exp) => prev.orElse!(e => e)(exp))
+            (err!Res("Failed to find GPU with Vulkan support."));
+}
+
+auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
+        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import std.experimental.allocator : makeArray, dispose;
+    import erupted : VkDevice;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(VkDevice, "device"));
+
+    from!"erupted".VkDeviceQueueCreateInfo queueCreateInfo;
+    queueCreateInfo.queueFamilyIndex = arg.queueFamilyIndices.graphicsFamily;
+    queueCreateInfo.queueCount = 1;
+
+    immutable queuePriority = 1.0f;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
+
+    from!"erupted".VkDeviceCreateInfo createInfo;
+
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    createInfo.queueCreateInfoCount = 1;
+
+    createInfo.pEnabledFeatures = &deviceFeatures;
+
+    createInfo.enabledExtensionCount = 0;
+
+    static if(ValidationLayersEnabled)
+    {
+        createInfo.enabledLayerCount = ValidationLayers.length;
+        createInfo.ppEnabledLayerNames = ValidationLayers.ptr;
+    }
+    else
+    {
+        createInfo.enabledLayerCount = 0;
     }
 
-    return physicalDevice != VK_NULL_HANDLE
-        ? ok(Res(forward!arg.expand, physicalDevice))
-        : err!Res("Failed to find suitable GPU.");
+    VkDevice device;
+
+    return from!"erupted".vkCreateDevice(arg.physicalDevice, &createInfo, null, &device) == from!"erupted".VK_SUCCESS
+        ? ok(Res(forward!arg.expand, move(device)))
+        : err!Res("Failed to create logical device.");
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*))
+        && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
+        )
 {
     import core.lifetime : forward;
     import glfw_vulkan : glfwWindowShouldClose, glfwPollEvents;
@@ -383,14 +443,17 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
         && is(typeof(arg.instance) : from!"erupted".VkInstance)
         && from!"util".implies(ValidationLayersEnabled,
-            is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT)))
+            is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        )
 {
     import util : erase;
     import core.lifetime : forward;
-    import erupted : vkDestroyInstance;
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
+
+    from!"erupted".vkDestroyDevice(arg.device, null);
 
     debug(LearnVulkan_ValidationLayers)
     {
@@ -398,7 +461,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         vkDestroyDebugUtilsMessengerEXT(arg.instance, arg.debugMessenger, null);
     }
 
-    vkDestroyInstance(arg.instance, null);
+    from!"erupted".vkDestroyInstance(arg.instance, null);
 
     glfwDestroyWindow(arg.window);
     glfwTerminate();
@@ -407,10 +470,10 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 
     debug(LearnVulkan_ValidationLayers)
     {
-        return ok(forward!arg.erase!("window", "instance", "debugMessenger"));
+        return ok(forward!arg.erase!("window", "instance", "debugMessenger", "device"));
     }
     else
     {
-        return ok(forward!arg.erase!("window", "instance"));
+        return ok(forward!arg.erase!("window", "instance", "device"));
     }
 }
