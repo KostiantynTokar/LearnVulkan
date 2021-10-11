@@ -60,6 +60,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createInstance
         .andThen!((auto ref t) @trusted { loadInstanceLevelFunctions(t.instance); return ok(forward!t); })
         .andThenSetupDebugMessenger
+        .andThen!createSurface
         .andThen!pickPhysicalDevice
         .andThen!createLogicalDevice
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
@@ -274,6 +275,27 @@ extern(System) from!"erupted".VkBool32 debugCallback(
     return VK_FALSE;
 }
 
+auto ref createSurface(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
+        && is(typeof(arg.instance) : from!"erupted".VkInstance)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import glfw_vulkan : glfwCreateWindowSurface;
+    import erupted : VkSurfaceKHR, VK_SUCCESS;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(VkSurfaceKHR, "surface"));
+
+    VkSurfaceKHR surface;
+    return glfwCreateWindowSurface(arg.instance, arg.window, null, &surface) == VK_SUCCESS
+        ? ok(Res(forward!arg.expand, surface.move))
+        : err!Res("Failed to create window surface.");
+}
+
 bool isDeviceSuitable(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
 {
     // from!"erupted".VkPhysicalDeviceProperties deviceProperties;
@@ -461,6 +483,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
         && is(typeof(arg.instance) : from!"erupted".VkInstance)
+        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
         && from!"util".implies(ValidationLayersEnabled,
             is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
         && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -480,6 +503,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         vkDestroyDebugUtilsMessengerEXT(arg.instance, arg.debugMessenger, null);
     }
 
+    from!"erupted".vkDestroySurfaceKHR(arg.instance, arg.surface, null);
     from!"erupted".vkDestroyInstance(arg.instance, null);
 
     glfwDestroyWindow(arg.window);
@@ -489,10 +513,10 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 
     debug(LearnVulkan_ValidationLayers)
     {
-        return ok(forward!arg.erase!("window", "instance", "debugMessenger", "device"));
+        return ok(forward!arg.erase!("window", "instance", "surface", "debugMessenger", "device"));
     }
     else
     {
-        return ok(forward!arg.erase!("window", "instance", "device"));
+        return ok(forward!arg.erase!("window", "instance", "surface", "device"));
     }
 }
