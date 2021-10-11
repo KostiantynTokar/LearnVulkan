@@ -17,11 +17,12 @@ private:
 
 debug(LearnVulkan_ValidationLayers)
 {
-    enum ValidationLayersEnabled = true;
+    enum validationLayersEnabled = true;
+    static immutable char*[] validationLayers = ["VK_LAYER_KHRONOS_validation"];
 }
 else
 {
-    enum ValidationLayersEnabled = false;
+    enum validationLayersEnabled = false;
 }
 
 enum WindowWidth = 800;
@@ -107,8 +108,8 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
         {
             return err!Res("Requested validation layers are not available.");
         }
-        createInfo.enabledLayerCount = ValidationLayers.length;
-        createInfo.ppEnabledLayerNames = ValidationLayers.ptr;
+        createInfo.enabledLayerCount = validationLayers.length;
+        createInfo.ppEnabledLayerNames = validationLayers.ptr;
 
         immutable debugCreateInfo = defaultDebugMessengerCreateInfo();
         createInfo.pNext = &debugCreateInfo;
@@ -167,8 +168,6 @@ auto getRequiredExtensions() nothrow @nogc @trusted
 
 debug(LearnVulkan_ValidationLayers)
 {
-    static immutable char*[] ValidationLayers = ["VK_LAYER_KHRONOS_validation"];
-
     bool checkValidationLayerSupport() nothrow @nogc @trusted
     {
         import core.stdc.string : strcmp;
@@ -182,7 +181,7 @@ debug(LearnVulkan_ValidationLayers)
         scope(exit) () @trusted { Mallocator.instance.dispose(availableLayers); }();
         vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.ptr);
 
-        foreach (ref const layerName; ValidationLayers)
+        foreach (ref const layerName; validationLayers)
         {
             auto layerFound = false;
 
@@ -453,10 +452,10 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
 
     createInfo.enabledExtensionCount = 0;
 
-    static if(ValidationLayersEnabled)
+    static if(validationLayersEnabled)
     {
-        createInfo.enabledLayerCount = ValidationLayers.length;
-        createInfo.ppEnabledLayerNames = ValidationLayers.ptr;
+        createInfo.enabledLayerCount = validationLayers.length;
+        createInfo.ppEnabledLayerNames = validationLayers.ptr;
     }
     else
     {
@@ -514,7 +513,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
         && is(typeof(arg.instance) : from!"erupted".VkInstance)
         && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
-        && from!"util".implies(ValidationLayersEnabled,
+        && from!"util".implies(validationLayersEnabled,
             is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         )
@@ -542,7 +541,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 
     freeVulkanLib();
 
-    static if(ValidationLayersEnabled)
+    static if(validationLayersEnabled)
     {
         alias validationLayersErasedNames = AliasSeq!("debugMessenger");
     }
