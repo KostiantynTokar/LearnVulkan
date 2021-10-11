@@ -63,6 +63,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!pickPhysicalDevice
         .andThen!createLogicalDevice
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
+        .andThen!getDeviceQueue
         ;
 }
 
@@ -417,8 +418,26 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     VkDevice device;
 
     return from!"erupted".vkCreateDevice(arg.physicalDevice, &createInfo, null, &device) == from!"erupted".VK_SUCCESS
-        ? ok(Res(forward!arg.expand, move(device)))
+        ? ok(Res(forward!arg.expand, device.move))
         : err!Res("Failed to create logical device.");
+}
+
+auto ref getDeviceQueue(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import erupted : VkQueue, vkGetDeviceQueue;
+
+    alias Res = TupleCat!(T, Tuple!(VkQueue, "graphicsQueue"));
+
+    VkQueue graphicsQueue;
+    vkGetDeviceQueue(arg.device, arg.queueFamilyIndices.graphicsFamily, 0, &graphicsQueue);
+    return from!"expected".ok(Res(forward!arg.expand, graphicsQueue.move));
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
