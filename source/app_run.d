@@ -428,6 +428,22 @@ from!"erupted".VkSurfaceFormatKHR chooseSwapSurfaceFormat(VkSurfaceFormatKHRArra
     return availableFormats.ptr[0];
 }
 
+from!"erupted".VkPresentModeKHR chooseSwapPresentMode(VkPresentModeKHRArray)(
+    const auto ref VkPresentModeKHRArray availablePresentModes
+    ) nothrow @nogc @trusted
+{
+    foreach(const ref availablePresentMode; availablePresentModes[])
+    {
+        // Search for mode that can be used for triple buffering.
+        if(availablePresentMode == from!"erupted".VK_PRESENT_MODE_MAILBOX_KHR)
+        {
+            return availablePresentMode;
+        }
+    }
+    // This mode is guaranteed to be available. Used for double buffering.
+    return from!"erupted".VK_PRESENT_MODE_FIFO_KHR;
+}
+
 bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
 {
     import core.stdc.string : strcmp;
@@ -511,6 +527,7 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
                 return err!Res("Failed to find suitable GPU.");
             }
             auto format = chooseSwapSurfaceFormat(swapChainSupport.formats);
+            auto presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
             immutable indices = findQueueFamilies(elem[0], elem[1].surface);
             return indices.match!(
                 queueFamilyIndices => ok(Res(elem[1].expand, elem[0], queueFamilyIndices, swapChainSupport)),
