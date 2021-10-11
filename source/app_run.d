@@ -491,6 +491,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 {
     import util : erase;
     import core.lifetime : forward;
+    import std.meta : AliasSeq;
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
@@ -511,12 +512,15 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 
     freeVulkanLib();
 
-    debug(LearnVulkan_ValidationLayers)
+    static if(ValidationLayersEnabled)
     {
-        return ok(forward!arg.erase!("window", "instance", "surface", "debugMessenger", "device"));
+        alias validationLayersErasedNames = AliasSeq!("debugMessenger");
     }
     else
     {
-        return ok(forward!arg.erase!("window", "instance", "surface", "device"));
+        alias validationLayersErasedNames = AliasSeq!();
     }
+
+    alias erasedNames = AliasSeq!("window", "instance", "surface", "device", validationLayersErasedNames);
+    return ok(forward!arg.erase!erasedNames);
 }
