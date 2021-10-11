@@ -412,6 +412,22 @@ SwapChainSupportDetails querySwapChainSupport(
     return details;
 }
 
+from!"erupted".VkSurfaceFormatKHR chooseSwapSurfaceFormat(VkSurfaceFormatKHRArray)(
+    const auto ref VkSurfaceFormatKHRArray availableFormats
+    ) nothrow @nogc @trusted
+{
+    foreach(const ref availableFormat; availableFormats[])
+    {
+        if(availableFormat.format == from!"erupted".VK_FORMAT_B8G8R8A8_SRGB
+            && availableFormat.colorSpace == from!"erupted".VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        {
+            return availableFormat;
+        }
+    }
+    // TODO: statically verify that availableFormats is not empty.
+    return availableFormats.ptr[0];
+}
+
 bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
 {
     import core.stdc.string : strcmp;
@@ -494,6 +510,7 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
             {
                 return err!Res("Failed to find suitable GPU.");
             }
+            auto format = chooseSwapSurfaceFormat(swapChainSupport.formats);
             immutable indices = findQueueFamilies(elem[0], elem[1].surface);
             return indices.match!(
                 queueFamilyIndices => ok(Res(elem[1].expand, elem[0], queueFamilyIndices, swapChainSupport)),
