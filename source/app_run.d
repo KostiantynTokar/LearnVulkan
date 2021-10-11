@@ -491,7 +491,8 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
 
     createInfo.pEnabledFeatures = &deviceFeatures;
 
-    createInfo.enabledExtensionCount = 0;
+    createInfo.enabledExtensionCount = deviceExtensions.length;
+    createInfo.ppEnabledExtensionNames = deviceExtensions.ptr;
 
     static if(validationLayersEnabled)
     {
