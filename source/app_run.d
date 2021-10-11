@@ -296,32 +296,37 @@ auto ref createSurface(T)(auto ref T arg) nothrow @nogc @trusted
         : err!Res("Failed to create window surface.");
 }
 
-bool isDeviceSuitable(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
-{
-    // from!"erupted".VkPhysicalDeviceProperties deviceProperties;
-    // from!"erupted".vkGetPhysicalDeviceProperties(device, &deviceProperties);
+// bool isDeviceSuitable(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
+// {
+//     // from!"erupted".VkPhysicalDeviceProperties deviceProperties;
+//     // from!"erupted".vkGetPhysicalDeviceProperties(device, &deviceProperties);
 
-    // from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
-    // from!"erupted".vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+//     // from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
+//     // from!"erupted".vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
 
-    import optional : match;
+//     import optional : match;
 
-    immutable indices = findQueueFamilies(device);
+//     immutable indices = findQueueFamilies(device);
 
-    return indices.match!(v => true, () => false);
-}
+//     return indices.match!(v => true, () => false);
+// }
 
 struct QueueFamilyIndices
 {
     uint graphicsFamily;
+    uint presentFamily;
 }
 
-from!"optional".Optional!QueueFamilyIndices findQueueFamilies(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
+from!"optional".Optional!QueueFamilyIndices findQueueFamilies
+    (
+        from!"erupted".VkPhysicalDevice device,
+        from!"erupted".VkSurfaceKHR surface,
+    ) nothrow @nogc @trusted
 {
     import std.experimental.allocator.mallocator : Mallocator;
     import std.experimental.allocator : makeArray, dispose;
     import erupted : VkQueueFamilyProperties, vkGetPhysicalDeviceQueueFamilyProperties,
-        VK_QUEUE_GRAPHICS_BIT;
+        vkGetPhysicalDeviceSurfaceSupportKHR, VkBool32, VK_QUEUE_GRAPHICS_BIT;
     import optional : Optional, match, some, none;
     
     uint queueFamilyCount;
@@ -332,16 +337,30 @@ from!"optional".Optional!QueueFamilyIndices findQueueFamilies(from!"erupted".VkP
 
     Optional!QueueFamilyIndices indices;
     Optional!uint optGraphicsFamily;
+    Optional!uint optPresentFamily;
 
     foreach(i, const ref queueFamily; queueFamilies)
     {
+        auto ind = cast(uint) i;
+
         if(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
         {
-           optGraphicsFamily = cast(uint) i;
+           optGraphicsFamily = ind;
+        }
+
+        VkBool32 presentSupport = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, ind, surface, &presentSupport);
+        if(presentSupport)
+        {
+            optPresentFamily = ind;
         }
 
         indices = optGraphicsFamily.match!(
-            graphicsFamily => some(QueueFamilyIndices(graphicsFamily)),
+            graphicsFamily => 
+                optPresentFamily.match!(
+                    presentFamily => some(QueueFamilyIndices(graphicsFamily, presentFamily)),
+                    () => Optional!QueueFamilyIndices()
+                ),
             () => Optional!QueueFamilyIndices()
         );
         if(!indices.empty) break;
@@ -384,7 +403,7 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     return devices.zip(arg.repeat)
         .map!((elem)
         {
-            immutable indices = findQueueFamilies(elem[0]);
+            immutable indices = findQueueFamilies(elem[0], elem[1].surface);
             return indices.match!(
                 q => ok(Res(elem[1].expand, elem[0], q)),
                 () => err!Res("Failed to find suitable GPU."));
