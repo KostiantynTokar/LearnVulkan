@@ -1,6 +1,7 @@
 {
 	"name": "learn-vulkan",
 	"dependencies": {
+		"automem": "~>0.6.7",
 		"gfm": "~>8.0.6",
 		"bindbc-glfw": "~>1.0.0",
 		"erupted": "~>2.1.42+v1.2.192",

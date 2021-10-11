@@ -370,6 +370,48 @@ from!"optional".Optional!QueueFamilyIndices findQueueFamilies
     return indices;
 }
 
+struct SwapChainSupportDetails
+{
+    import std.experimental.allocator.mallocator : Mallocator;
+    import automem : Vector;
+
+    from!"erupted".VkSurfaceCapabilitiesKHR capabilities;
+    Vector!(from!"erupted".VkSurfaceFormatKHR, Mallocator) formats;
+    Vector!(from!"erupted".VkPresentModeKHR, Mallocator) presentModes;
+}
+
+SwapChainSupportDetails querySwapChainSupport(
+    from!"erupted".VkPhysicalDevice device,
+    from!"erupted".VkSurfaceKHR surface,
+    ) nothrow @nogc @trusted
+{
+    import erupted : vkGetPhysicalDeviceSurfaceCapabilitiesKHR,
+        vkGetPhysicalDeviceSurfaceFormatsKHR,
+        vkGetPhysicalDeviceSurfacePresentModesKHR;
+    
+    SwapChainSupportDetails details;
+
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
+
+    uint formatCount;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, null);
+    if(formatCount != 0)
+    {
+        details.formats.length = formatCount;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.ptr);
+    }
+
+    uint presentModeCount;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, null);
+    if(presentModeCount != 0)
+    {
+        details.presentModes.length = presentModeCount;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.ptr);
+    }
+
+    return details;
+}
+
 bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
 {
     import core.stdc.string : strcmp;
@@ -421,7 +463,11 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     import expected : ok, err, orElse;
     import optional : Optional, match;
 
-    alias Res = TupleCat!(T, Tuple!(VkPhysicalDevice, "physicalDevice", QueueFamilyIndices, "queueFamilyIndices"));
+    alias Res = TupleCat!(T, Tuple!(
+        VkPhysicalDevice, "physicalDevice",
+        QueueFamilyIndices, "queueFamilyIndices",
+        SwapChainSupportDetails, "swapChainSupport",
+        ));
     
     uint deviceCount;
     vkEnumeratePhysicalDevices(arg.instance, &deviceCount, null);
@@ -443,9 +489,14 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
             {
                 return err!Res("Failed to find suitable GPU.");
             }
+            auto swapChainSupport = querySwapChainSupport(elem[0], elem[1].surface);
+            if(swapChainSupport.formats.empty || swapChainSupport.presentModes.empty)
+            {
+                return err!Res("Failed to find suitable GPU.");
+            }
             immutable indices = findQueueFamilies(elem[0], elem[1].surface);
             return indices.match!(
-                q => ok(Res(elem[1].expand, elem[0], q)),
+                queueFamilyIndices => ok(Res(elem[1].expand, elem[0], queueFamilyIndices, swapChainSupport)),
                 () => err!Res("Failed to find suitable GPU."));
         })
         .fold!((prev, exp) => prev.orElse!(e => e)(exp))
