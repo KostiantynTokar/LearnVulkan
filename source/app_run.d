@@ -444,6 +444,34 @@ from!"erupted".VkPresentModeKHR chooseSwapPresentMode(VkPresentModeKHRArray)(
     return from!"erupted".VK_PRESENT_MODE_FIFO_KHR;
 }
 
+from!"erupted".VkExtent2D chooseSwapExtent(
+    const ref from!"erupted".VkSurfaceCapabilitiesKHR capabilities
+    ) nothrow @nogc @trusted
+{
+    import std.algorithm : clamp;
+
+    if(capabilities.currentExtent.width != uint.max)
+    {
+        // Window manager allows non-fixed extent.
+        return capabilities.currentExtent;
+    }
+
+    from!"erupted".VkExtent2D actualExtent;
+
+    actualExtent.width = WindowWidth
+        .clamp(
+            capabilities.minImageExtent.width,
+            capabilities.maxImageExtent.width
+            );
+    actualExtent.height = WindowHeight
+        .clamp(
+            capabilities.minImageExtent.height,
+            capabilities.maxImageExtent.height
+            );
+    
+    return actualExtent;
+}
+
 bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
 {
     import core.stdc.string : strcmp;
