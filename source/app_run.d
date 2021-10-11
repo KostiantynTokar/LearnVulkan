@@ -68,6 +68,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createLogicalDevice
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
         .andThen!getDeviceQueues
+        .andThen!createSwapChain
         ;
 }
 
@@ -412,6 +413,15 @@ SwapChainSupportDetails querySwapChainSupport(
     return details;
 }
 
+struct ChosenSwapChainSupport
+{
+    from!"erupted".VkSurfaceCapabilitiesKHR capabilities;
+    from!"erupted".VkSurfaceFormatKHR surfaceFormat;
+    from!"erupted".VkPresentModeKHR presentMode;
+    from!"erupted".VkExtent2D extent;
+    uint imageCount;
+}
+
 from!"erupted".VkSurfaceFormatKHR chooseSwapSurfaceFormat(VkSurfaceFormatKHRArray)(
     const auto ref VkSurfaceFormatKHRArray availableFormats
     ) nothrow @nogc @trusted
@@ -472,6 +482,20 @@ from!"erupted".VkExtent2D chooseSwapExtent(
     return actualExtent;
 }
 
+uint chooseImageCount(
+    const ref from!"erupted".VkSurfaceCapabilitiesKHR capabilities
+    ) nothrow @nogc @trusted
+{
+    import std.algorithm : min;
+
+    if(capabilities.maxImageCount == 0)
+    {
+        // There is no maximum.
+        return capabilities.minImageCount + 1;
+    }
+    return min(capabilities.minImageCount + 1, capabilities.maxImageCount);
+}
+
 bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow @nogc @trusted
 {
     import core.stdc.string : strcmp;
@@ -526,7 +550,7 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     alias Res = TupleCat!(T, Tuple!(
         VkPhysicalDevice, "physicalDevice",
         QueueFamilyIndices, "queueFamilyIndices",
-        SwapChainSupportDetails, "swapChainSupport",
+        ChosenSwapChainSupport, "chosenSwapChainSupport",
         ));
     
     uint deviceCount;
@@ -554,11 +578,16 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
             {
                 return err!Res("Failed to find suitable GPU.");
             }
-            auto format = chooseSwapSurfaceFormat(swapChainSupport.formats);
-            auto presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+            immutable chosenSwapChainSupport = ChosenSwapChainSupport(
+                swapChainSupport.capabilities,
+                chooseSwapSurfaceFormat(swapChainSupport.formats),
+                chooseSwapPresentMode(swapChainSupport.presentModes),
+                chooseSwapExtent(swapChainSupport.capabilities),
+                chooseImageCount(swapChainSupport.capabilities)
+            );
             immutable indices = findQueueFamilies(elem[0], elem[1].surface);
             return indices.match!(
-                queueFamilyIndices => ok(Res(elem[1].expand, elem[0], queueFamilyIndices, swapChainSupport)),
+                queueFamilyIndices => ok(Res(elem[1].expand, elem[0], queueFamilyIndices, chosenSwapChainSupport)),
                 () => err!Res("Failed to find suitable GPU."));
         })
         .fold!((prev, exp) => prev.orElse!(e => e)(exp))
@@ -646,6 +675,67 @@ auto ref getDeviceQueues(T)(auto ref T arg) nothrow @nogc @trusted
     return from!"expected".ok(Res(forward!arg.expand, graphicsQueue.move, presentQueue.move));
 }
 
+auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
+        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+        && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import erupted : VkSwapchainKHR;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(VkSwapchainKHR, "swapChain"));
+
+    from!"erupted".VkSwapchainCreateInfoKHR createInfo;
+
+    createInfo.surface = arg.surface;
+    createInfo.minImageCount = arg.chosenSwapChainSupport.imageCount;
+    createInfo.imageFormat = arg.chosenSwapChainSupport.surfaceFormat.format;
+    createInfo.imageColorSpace = arg.chosenSwapChainSupport.surfaceFormat.colorSpace;
+    createInfo.imageExtent = arg.chosenSwapChainSupport.extent;
+    // Always 1 unless for stereoscopic 3D application.
+    createInfo.imageArrayLayers = 1;
+    // Render directly to imega. Use VK_IMAGE_USAGE_TRANSFER_DST_BIT for off-screen rendering.
+    createInfo.imageUsage = from!"erupted".VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    const uint[2] queueFamilyIndicesArr = [arg.queueFamilyIndices.graphicsFamily, arg.queueFamilyIndices.presentFamily];
+    if(arg.queueFamilyIndices.graphicsFamily != arg.queueFamilyIndices.presentFamily)
+    {
+        // Can be exclusive (more performant), but it requires explicit ownership control.
+        createInfo.imageSharingMode = from!"erupted".VK_SHARING_MODE_CONCURRENT;
+        createInfo.queueFamilyIndexCount = 2;
+        createInfo.pQueueFamilyIndices = queueFamilyIndicesArr.ptr;
+    }
+    else
+    {
+        createInfo.imageSharingMode = from!"erupted".VK_SHARING_MODE_EXCLUSIVE;
+        createInfo.queueFamilyIndexCount = 0; // Optional
+        createInfo.pQueueFamilyIndices = null; // Optional
+    }
+
+    // Do not want any transforms applied to swap chain images.
+    createInfo.preTransform = arg.chosenSwapChainSupport.capabilities.currentTransform;
+
+    // Blending with other windows in the window system.
+    createInfo.compositeAlpha = from!"erupted".VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    
+    createInfo.presentMode = arg.chosenSwapChainSupport.presentMode;
+    // Do not render obscured pixels.
+    createInfo.clipped = from!"erupted".VK_TRUE;
+
+    createInfo.oldSwapchain = from!"erupted".VK_NULL_HANDLE;
+
+    VkSwapchainKHR swapChain;
+    return from!"erupted".vkCreateSwapchainKHR(arg.device, &createInfo, null, &swapChain) == from!"erupted".VK_SUCCESS
+        ? ok(Res(forward!arg.expand, swapChain.move))
+        : err!Res("Failed to create swap chain.");
+}
+
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
@@ -671,6 +761,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && from!"util".implies(validationLayersEnabled,
             is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
         && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
         )
 {
     import util : erase;
@@ -680,6 +771,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
 
+    from!"erupted".vkDestroySwapchainKHR(arg.device, arg.swapChain, null);
     from!"erupted".vkDestroyDevice(arg.device, null);
 
     debug(LearnVulkan_ValidationLayers)
@@ -705,6 +797,13 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         alias validationLayersErasedNames = AliasSeq!();
     }
 
-    alias erasedNames = AliasSeq!("window", "instance", "surface", "device", validationLayersErasedNames);
+    alias erasedNames = AliasSeq!(
+        "window",
+        "instance",
+        "surface",
+        "device",
+        "swapChain",
+        validationLayersErasedNames,
+        );
     return ok(forward!arg.erase!erasedNames);
 }
