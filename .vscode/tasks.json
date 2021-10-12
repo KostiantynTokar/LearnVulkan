@@ -8,6 +8,12 @@
 			"label": "Build dependencies"
 		},
 		{
+			"type": "shell",
+			"command": "./compile_shaders.sh",
+			"group": "build",
+			"label": "Compile shaders"
+		},
+		{
 			"type": "dub",
 			"run": false,
 			"compiler": "ldc2",
