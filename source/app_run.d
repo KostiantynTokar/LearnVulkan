@@ -71,6 +71,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createSwapChain
         .andThen!getSwapChainImages
         .andThen!createImageViews
+        .andThen!createGraphicsPipeline
         ;
 }
 
@@ -813,6 +814,68 @@ auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
     }
 
     return ok(Res(forward!arg.expand, swapChainImageViews.move));
+}
+
+auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code) nothrow @nogc @trusted
+    in(cast(ptrdiff_t) code.ptr % 4 == 0)
+{
+    import expected : ok, err;
+    
+    alias Res = from!"erupted".VkShaderModule;
+
+    from!"erupted".VkShaderModuleCreateInfo createInfo;
+    createInfo.codeSize = code.length;
+    createInfo.pCode = cast(const(uint)*) code.ptr;
+
+    from!"erupted".VkShaderModule shaderModule;
+    return from!"erupted".vkCreateShaderModule(device, &createInfo, null, &shaderModule) == from!"erupted".VK_SUCCESS
+        ? ok(shaderModule)
+        : err!Res("Failed to create shader module");
+}
+
+auto ref createShaderModule(from!"erupted".VkDevice device, immutable(char)* compiledShaderFileName) nothrow @nogc @trusted
+{
+    import core.stdc.stdio : fopen, fclose, fread, fseek, ftell, SEEK_SET, SEEK_END;
+    import std.experimental.allocator : makeArray, dispose;
+    import util : StaticAlignedMallocator;
+
+    auto shaderFile = fopen(compiledShaderFileName, "rb");
+    scope(exit) fclose(shaderFile);
+    fseek(shaderFile, 0, SEEK_END);
+    auto shaderSize = ftell(shaderFile);
+    fseek(shaderFile, 0, SEEK_SET);
+    auto shaderCode = StaticAlignedMallocator!4.instance.makeArray!(ubyte)(shaderSize);
+    scope(exit) () @trusted { StaticAlignedMallocator!4.instance.dispose(shaderCode); }();
+    fread(shaderCode.ptr, 1, shaderSize, shaderFile);
+
+    return createShaderModule(device, shaderCode);
+}
+
+auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import core.stdc.stdio : fopen, fclose, fread, fseek, ftell, SEEK_SET, SEEK_END;
+    import std.experimental.allocator : makeArray, dispose;
+    import util : StaticAlignedMallocator;
+    import erupted : vkDestroyShaderModule;
+    import expected : ok, andThen;
+
+    return createShaderModule(arg.device, "shaders_bin/vert.spv")
+        .andThen!((vertShaderModule) @trusted
+        {
+            scope(exit) vkDestroyShaderModule(arg.device, vertShaderModule, null);
+            return createShaderModule(arg.device, "shaders_bin/frag.spv")
+                .andThen!((fragShaderModule) @trusted
+                {
+                    scope(exit) vkDestroyShaderModule(arg.device, fragShaderModule, null);
+                    return ok(forward!arg);
+                });
+        });
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted

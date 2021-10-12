@@ -7,6 +7,29 @@ bool implies(in bool antecedent, in bool consequent) pure nothrow @nogc @safe
     return (!antecedent) || consequent;
 }
 
+struct StaticAlignedMallocator(uint alignment_)
+{
+    import std.experimental.allocator : forwardToMember;
+    import std.experimental.allocator.mallocator : Mallocator;
+
+    enum uint alignment = alignment_;
+    mixin(forwardToMember("Mallocator.instance",
+        "goodAllocSize",
+        "allocate",
+        "alignedAllocate",
+        "allocateAll",
+        "expand",
+        "reallocate",
+        "alignedReallocate",
+        "owns",
+        "resolveInternalPointer",
+        "deallocate",
+        "deallocateAll",
+        "empty"
+        ));
+    static StaticAlignedMallocator instance;
+}
+
 template TupleCat(Ts...)
     if(from!"std.meta".allSatisfy!(from!"std.typecons".isTuple, Ts))
 {
