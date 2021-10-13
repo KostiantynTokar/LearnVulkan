@@ -1374,24 +1374,77 @@ auto ref createSemaphores(T)(auto ref T arg) nothrow @nogc @trusted
     return ok(Res(forward!arg.expand, semaphores[0].move, semaphores[1].move));
 }
 
-void drawFrame() nothrow @nogc @trusted
+auto drawFrame(VkCommandBufferArray)(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkQueue graphicsQueue,
+    from!"erupted".VkSwapchainKHR swapChain,
+    from!"erupted".VkSemaphore imageAvailableSemaphore,
+    from!"erupted".VkSemaphore renderFinishedSemaphore,
+    auto ref VkCommandBufferArray commandBuffers,
+    ) nothrow @nogc @trusted
+    if(is(from!"std.range".ElementType!(typeof(commandBuffers[])) : from!"erupted".VkCommandBuffer))
 {
+    import erupted : vkQueueSubmit, VK_NULL_HANDLE, VK_SUCCESS;
+    import expected : ok, err;
+    
+    uint imageIndex;
+    from!"erupted".vkAcquireNextImageKHR(
+        device,
+        swapChain,
+        ulong.max, // Timeout in nanoseconds. 64 unsigned max disables timeout.
+        imageAvailableSemaphore,
+        VK_NULL_HANDLE, // Fence.
+        &imageIndex,
+        );
+    
+    const from!"erupted".VkPipelineStageFlags[1] waitStages =
+    [
+        from!"erupted".VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+    ];
 
+    const from!"erupted".VkSubmitInfo submitInfo =
+    {
+        waitSemaphoreCount : 1,
+        pWaitSemaphores : &imageAvailableSemaphore,
+        pWaitDstStageMask : waitStages.ptr,
+
+        commandBufferCount : 1,
+        pCommandBuffers : &commandBuffers.ptr[imageIndex], // TODO: get rid of ptr.
+
+        signalSemaphoreCount : 1,
+        pSignalSemaphores : &renderFinishedSemaphore,
+    };
+
+    return vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) == VK_SUCCESS
+        ? ok()
+        : err("Failed to submit draw command buffer.");
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
+        && is(typeof(arg.imageAvailableSemaphore) : from!"erupted".VkSemaphore)
+        && is(typeof(arg.renderFinishedSemaphore) : from!"erupted".VkSemaphore)
+        && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
         )
 {
     import core.lifetime : forward;
     import glfw_vulkan : glfwWindowShouldClose, glfwPollEvents;
-    import expected : ok;
+    import expected : ok, err;
 
     while(!glfwWindowShouldClose(arg.window))
     {
         glfwPollEvents();
-        drawFrame();
+        auto exp = drawFrame(
+            arg.device, arg.graphicsQueue, arg.swapChain,
+            arg.imageAvailableSemaphore, arg.renderFinishedSemaphore,
+            arg.commandBuffers);
+        if(!exp)
+        {
+            return err!T(exp.error);
+        }
     }
 
     return ok(forward!arg);
