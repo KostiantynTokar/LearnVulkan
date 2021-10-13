@@ -778,6 +778,7 @@ auto ref getSwapChainImages(T)(auto ref T arg) nothrow @nogc @trusted
 
 auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
         && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
         )
@@ -826,6 +827,10 @@ auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
         if(from!"erupted".vkCreateImageView(arg.device, &createInfo, null, &swapChainImageViews.ptr[i])
             != from!"erupted".VK_SUCCESS)
         {
+            foreach(ref imageView; swapChainImageViews.ptr[0 .. i])
+            {
+                from!"erupted".vkDestroyImageView(arg.device, imageView, null);
+            }
             return err!Res("Failed to create image view.");
         }
     }
