@@ -73,6 +73,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createImageViews
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
+        .andThen!createFramebuffers
         ;
 }
 
@@ -1139,6 +1140,59 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
         });
 }
 
+auto ref createFramebuffers(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+        && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import std.range : enumerate;
+    import erupted : VK_SUCCESS, vkCreateFramebuffer, vkDestroyFramebuffer;
+    import expected : ok, err;
+    import automem : Vector;
+    
+    alias VectorType = Vector!(from!"erupted".VkFramebuffer, Mallocator);
+    alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainFramebuffers"));
+
+    VectorType swapChainFramebuffers;
+    swapChainFramebuffers.length = arg.swapChainImageViews.length;
+
+    foreach (i, ref imageView; arg.swapChainImageViews[].enumerate)
+    {
+        const from!"erupted".VkImageView[1] attachments =
+        [
+            imageView,
+        ];
+
+        const from!"erupted".VkFramebufferCreateInfo framebufferInfo =
+        {
+            renderPass : arg.renderPass,
+            attachmentCount : 1,
+            pAttachments : attachments.ptr,
+            width : arg.swapChainExtent.width,
+            height : arg.swapChainExtent.height,
+            layers : 1, // Number of layers in image arrays.
+        };
+
+        if(vkCreateFramebuffer(arg.device, &framebufferInfo, null, &swapChainFramebuffers.ptr[i]) != VK_SUCCESS)
+        {
+            foreach(ref framebuffer; swapChainFramebuffers.ptr[0 .. i])
+            {
+                vkDestroyFramebuffer(arg.device, framebuffer, null);
+            }
+            return err!Res("Failed to create framebuffer.");
+        }
+    }
+
+    return ok(Res(forward!arg.expand, swapChainFramebuffers.move));
+}
+
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
@@ -1169,6 +1223,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
         && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
         && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
         )
 {
     import util : erase;
@@ -1178,11 +1233,16 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
 
+    foreach(ref framebuffer; arg.swapChainFramebuffers[])
+    {
+        from!"erupted".vkDestroyFramebuffer(arg.device, framebuffer, null);
+    }
+
     from!"erupted".vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
     from!"erupted".vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
     from!"erupted".vkDestroyRenderPass(arg.device, arg.renderPass, null);
 
-    foreach(ref imageView; arg.swapChainImageViews)
+    foreach(ref imageView; arg.swapChainImageViews[])
     {
         from!"erupted".vkDestroyImageView(arg.device, imageView, null);
     }
@@ -1223,6 +1283,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         "renderPass",
         "pipelineLayout",
         "graphicsPipeline",
+        "swapChainFramebuffers",
         validationLayersErasedNames,
         );
     return ok(forward!arg.erase!erasedNames);
