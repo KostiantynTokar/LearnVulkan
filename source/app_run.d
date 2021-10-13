@@ -854,16 +854,19 @@ auto ref createShaderModule(from!"erupted".VkDevice device, immutable(char)* com
 auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
         )
 {
     import util : TupleCat;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
-    import core.stdc.stdio : fopen, fclose, fread, fseek, ftell, SEEK_SET, SEEK_END;
-    import std.experimental.allocator : makeArray, dispose;
-    import util : StaticAlignedMallocator;
-    import erupted : vkDestroyShaderModule;
-    import expected : ok, andThen;
+    import erupted : VkPipelineLayout, vkDestroyShaderModule, VK_FALSE, VK_TRUE, VK_SUCCESS;
+    import expected : ok, err, andThen;
+
+    alias Res = TupleCat!(T, Tuple!
+        (
+            VkPipelineLayout, "pipelineLayout"
+        ));
 
     return createShaderModule(arg.device, "shaders_bin/vert.spv")
         .andThen!((vertShaderModule) @trusted
@@ -873,7 +876,152 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                 .andThen!((fragShaderModule) @trusted
                 {
                     scope(exit) vkDestroyShaderModule(arg.device, fragShaderModule, null);
-                    return ok(forward!arg);
+
+                    const from!"erupted".VkPipelineShaderStageCreateInfo[2] shaderStageInfos =
+                    [
+                        {
+                            stage : from!"erupted".VK_SHADER_STAGE_VERTEX_BIT,
+                            module_ : vertShaderModule,
+                            pName : "main", // Entry point.
+                            pSpecializationInfo : null, // Specifying shader constants.
+                        },
+                        {
+                            stage : from!"erupted".VK_SHADER_STAGE_FRAGMENT_BIT,
+                            module_ : fragShaderModule,
+                            pName : "main", // Entry point.
+                            pSpecializationInfo : null, // Specifying shader constants.
+                        },
+                    ];
+
+                    const from!"erupted".VkPipelineVertexInputStateCreateInfo vertexInput =
+                    {
+                        // Data is per-vertex or per-instance?
+                        vertexBindingDescriptionCount : 0,
+                        pVertexBindingDescriptions : null,
+                        // Binding and offset of attributes.
+                        vertexAttributeDescriptionCount : 0,
+                        pVertexAttributeDescriptions : null,
+                    };
+
+                    const from!"erupted".VkPipelineInputAssemblyStateCreateInfo inputAssembly =
+                    {
+                        topology : from!"erupted".VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                        primitiveRestartEnable : VK_FALSE,
+                    };
+
+                    const from!"erupted".VkViewport viewport =
+                    {
+                        x : 0.0f,
+                        y : 0.0f,
+                        width : arg.swapChainExtent.width,
+                        height : arg.swapChainExtent.height,
+                        minDepth : 0.0f,
+                        maxDepth : 1.0f,
+                    };
+
+                    const from!"erupted".VkRect2D scissor =
+                    {
+                        offset : {0, 0},
+                        extent : arg.swapChainExtent,
+                    };
+
+                    const from!"erupted".VkPipelineViewportStateCreateInfo viewportState =
+                    {
+                        viewportCount : 1, // Need extension for more then 1.
+                        pViewports : &viewport,
+                        scissorCount : 1, // Need extension for more then 1.
+                        pScissors : &scissor,
+                    };
+
+                    const from!"erupted".VkPipelineRasterizationStateCreateInfo rasterizer =
+                    {
+                        depthClampEnable : VK_FALSE,
+                        rasterizerDiscardEnable : VK_FALSE,
+                        // Other modes require GPU feature.
+                        polygonMode : from!"erupted".VK_POLYGON_MODE_FILL,
+                        // 1 pixel wide. Thicker requires wideLines GPU feature.
+                        lineWidth : 1.0f,
+                        cullMode : from!"erupted".VK_CULL_MODE_BACK_BIT,
+                        frontFace : from!"erupted".VK_FRONT_FACE_CLOCKWISE,
+
+                        // Modify fragment's depth depending on its slope.
+                        depthBiasEnable : VK_FALSE,
+                        depthBiasConstantFactor : 0.0f, // Optional
+                        depthBiasClamp : 0.0f, // Optional
+                        depthBiasSlopeFactor : 0.0f, // Optional
+                    };
+
+                    // Multisampling requires a GPU feature.
+                    const from!"erupted".VkPipelineMultisampleStateCreateInfo multisampling =
+                    {
+                        sampleShadingEnable : VK_FALSE,
+                        rasterizationSamples : from!"erupted".VK_SAMPLE_COUNT_1_BIT,
+                        minSampleShading : 1.0f, // Optional
+                        pSampleMask : null, // Optional
+                        alphaToCoverageEnable : VK_FALSE, // Optional
+                        alphaToOneEnable : VK_FALSE, // Optional
+                    };
+
+                    // Optional
+                    // from!"erupted".VkPipelineDepthStencilStateCreateInfo depthStencil;
+                    
+                    // Framebuffer-specific blending options.
+                    const from!"erupted".VkPipelineColorBlendAttachmentState colorBlendAttachment =
+                    {
+                        colorWriteMask :
+                            from!"erupted".VK_COLOR_COMPONENT_R_BIT |
+                            from!"erupted".VK_COLOR_COMPONENT_G_BIT |
+                            from!"erupted".VK_COLOR_COMPONENT_B_BIT |
+                            from!"erupted".VK_COLOR_COMPONENT_A_BIT ,
+                        blendEnable : VK_FALSE,
+                        srcColorBlendFactor : from!"erupted".VK_BLEND_FACTOR_ONE, // Optional
+                        dstColorBlendFactor : from!"erupted".VK_BLEND_FACTOR_ZERO, // Optional
+                        colorBlendOp : from!"erupted".VK_BLEND_OP_ADD, // Optional
+                        srcAlphaBlendFactor : from!"erupted".VK_BLEND_FACTOR_ONE, // Optional
+                        dstAlphaBlendFactor : from!"erupted".VK_BLEND_FACTOR_ZERO, // Optional
+                        alphaBlendOp : from!"erupted".VK_BLEND_OP_ADD, // Optional
+                    };
+
+                    // Global blending options
+                    const from!"erupted".VkPipelineColorBlendStateCreateInfo colorBlending =
+                    {
+                        // Bitwise blending disables framebuffer-specific blending.
+                        logicOpEnable : VK_FALSE,
+                        logicOp : from!"erupted".VK_LOGIC_OP_COPY, // Optional
+                        attachmentCount : 1,
+                        pAttachments : &colorBlendAttachment,
+                        blendConstants : [ 0.0f, 0.0f, 0.0f, 0.0f ] // Optional
+                    };
+
+                    const from!"erupted".VkDynamicState[2] dynamicStates =
+                    [
+                        from!"erupted".VK_DYNAMIC_STATE_VIEWPORT,
+                        from!"erupted".VK_DYNAMIC_STATE_LINE_WIDTH,
+                    ];
+
+                    const from!"erupted".VkPipelineDynamicStateCreateInfo dynamicState =
+                    {
+                        dynamicStateCount : 2,
+                        pDynamicStates : dynamicStates.ptr,
+                    };
+
+                    // Uniform variables and push constants
+                    const from!"erupted".VkPipelineLayoutCreateInfo pipelineLayoutInfo =
+                    {
+                        setLayoutCount : 0, // Optional
+                        pSetLayouts : null, // Optional
+                        pushConstantRangeCount : 0, // Optional
+                        pPushConstantRanges : null, // Optional
+                    };
+
+                    VkPipelineLayout pipelineLayout;
+                    if(from!"erupted".vkCreatePipelineLayout(
+                        arg.device, &pipelineLayoutInfo, null, &pipelineLayout) != VK_SUCCESS)
+                    {
+                        return err!Res("Failed to create pipeline layout.");
+                    }
+                    
+                    return ok(Res(forward!arg.expand, pipelineLayout.move));
                 });
         });
 }
@@ -905,6 +1053,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
         && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
+        && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
         )
 {
     import util : erase;
@@ -913,6 +1062,8 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
+
+    from!"erupted".vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
 
     foreach(ref imageView; arg.swapChainImageViews)
     {
