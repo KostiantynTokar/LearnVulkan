@@ -76,6 +76,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createFramebuffers
         .andThen!createCommandPool
         .andThen!createCommandBuffers
+        .andThen!createSemaphores
         ;
 }
 
@@ -1339,6 +1340,45 @@ auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
     return ok(Res(forward!arg.expand, commandBuffers.move));
 }
 
+auto ref createSemaphores(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import erupted : VkSemaphore, VkSemaphoreCreateInfo, vkCreateSemaphore, vkDestroySemaphore, VK_SUCCESS;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkSemaphore, "imageAvailableSemaphore",
+        VkSemaphore, "renderFinishedSemaphore",
+    ));
+
+
+    VkSemaphore[2] semaphores;
+    foreach(i; 0 .. semaphores.length)
+    {
+        const VkSemaphoreCreateInfo semaphoreInfo;
+        if(vkCreateSemaphore(arg.device, &semaphoreInfo, null, &semaphores[i]) != VK_SUCCESS)
+        {
+            foreach(j; 0 .. i)
+            {
+                vkDestroySemaphore(arg.device, semaphores[j], null);
+            }
+            return err!Res("Failed to create semaphore.");
+        }
+    }
+
+    return ok(Res(forward!arg.expand, semaphores[0].move, semaphores[1].move));
+}
+
+void drawFrame() nothrow @nogc @trusted
+{
+
+}
+
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
@@ -1351,6 +1391,7 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     while(!glfwWindowShouldClose(arg.window))
     {
         glfwPollEvents();
+        drawFrame();
     }
 
     return ok(forward!arg);
@@ -1371,6 +1412,8 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
         && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
         && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+        && is(typeof(arg.imageAvailableSemaphore) : from!"erupted".VkSemaphore)
+        && is(typeof(arg.renderFinishedSemaphore) : from!"erupted".VkSemaphore)
         )
 {
     import util : erase;
@@ -1379,6 +1422,9 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
+
+    from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphore, null);
+    from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphore, null);
 
     from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
@@ -1434,6 +1480,8 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         "graphicsPipeline",
         "swapChainFramebuffers",
         "commandPool",
+        "imageAvailableSemaphore",
+        "renderFinishedSemaphore",
         validationLayersErasedNames,
         );
     return ok(forward!arg.erase!erasedNames);
