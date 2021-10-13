@@ -74,6 +74,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
         .andThen!createFramebuffers
+        .andThen!createCommandPool
         ;
 }
 
@@ -1193,6 +1194,39 @@ auto ref createFramebuffers(T)(auto ref T arg) nothrow @nogc @trusted
     return ok(Res(forward!arg.expand, swapChainFramebuffers.move));
 }
 
+auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import erupted : VkCommandPool, vkCreateCommandPool, VK_SUCCESS;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkCommandPool, "commandPool",
+    ));
+
+    const from!"erupted".VkCommandPoolCreateInfo poolInfo =
+    {
+        queueFamilyIndex : arg.queueFamilyIndices.graphicsFamily,
+        flags : 0
+            // Hint that command buffers are rerecorded with new commands very often.
+            // | from!"erupted".VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
+            // Allow command buffers to be rerecorded individually, by default they are reset together.
+            // | from!"erupted".VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+            ,
+    };
+
+    VkCommandPool commandPool;
+    return vkCreateCommandPool(arg.device, &poolInfo, null, &commandPool) == VK_SUCCESS
+        ? ok(Res(forward!arg.expand, commandPool.move))
+        : err!Res("Failed to create command pool.");
+}
+
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
@@ -1224,6 +1258,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
         && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
         && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
+        && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
         )
 {
     import util : erase;
@@ -1232,6 +1267,8 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
+
+    from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
     foreach(ref framebuffer; arg.swapChainFramebuffers[])
     {
@@ -1284,6 +1321,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         "pipelineLayout",
         "graphicsPipeline",
         "swapChainFramebuffers",
+        "commandPool",
         validationLayersErasedNames,
         );
     return ok(forward!arg.erase!erasedNames);
