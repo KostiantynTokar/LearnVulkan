@@ -913,17 +913,19 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
         )
 {
     import util : TupleCat;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
-    import erupted : VkPipelineLayout, vkDestroyShaderModule, VK_FALSE, VK_TRUE, VK_SUCCESS;
+    import erupted : VkPipelineLayout, VkPipeline, vkDestroyShaderModule, VK_FALSE, VK_TRUE, VK_SUCCESS;
     import expected : ok, err, andThen;
 
     alias Res = TupleCat!(T, Tuple!
         (
-            VkPipelineLayout, "pipelineLayout"
+            VkPipelineLayout, "pipelineLayout",
+            VkPipeline, "graphicsPipeline",
         ));
 
     return createShaderModule(arg.device, "shaders_bin/vert.spv")
@@ -1078,8 +1080,38 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                     {
                         return err!Res("Failed to create pipeline layout.");
                     }
+
+                    const from!"erupted".VkGraphicsPipelineCreateInfo pipelineInfo =
+                    {
+                        stageCount : shaderStageInfos.length,
+                        pStages : shaderStageInfos.ptr,
+                        pVertexInputState : &vertexInput,
+                        pInputAssemblyState : &inputAssembly,
+                        pViewportState : &viewportState,
+                        pRasterizationState : &rasterizer,
+                        pMultisampleState : &multisampling,
+                        pDepthStencilState : null, // Optional
+                        pColorBlendState : &colorBlending,
+                        pDynamicState : null, // Optional
+                        layout : pipelineLayout,
+                        renderPass : arg.renderPass,
+                        subpass : 0, // Subpass index of this pipeline.
+                        // Specify parent pipelint with common settings.
+                        // VK_PIPELINE_CREATE_DERIVATIVE_BIT in flag should be set.
+                        basePipelineHandle : from!"erupted".VK_NULL_HANDLE,
+                        basePipelineIndex: -1,
+                    };
+
+                    VkPipeline graphicsPipeline;
+                    if(from!"erupted".vkCreateGraphicsPipelines(arg.device,
+                        from!"erupted".VK_NULL_HANDLE, // VkPipelineCache of data relevant to pipeline creation.
+                        1, &pipelineInfo, // Possible to create multiple pipelines at once.
+                        null, &graphicsPipeline) != VK_SUCCESS)
+                    {
+                        return err!Res("Failed to create graphics pipeline.");
+                    }
                     
-                    return ok(Res(forward!arg.expand, pipelineLayout.move));
+                    return ok(Res(forward!arg.expand, pipelineLayout.move, graphicsPipeline.move));
                 });
         });
 }
@@ -1113,6 +1145,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
         && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
         && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
+        && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
         )
 {
     import util : erase;
@@ -1122,6 +1155,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
 
+    from!"erupted".vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
     from!"erupted".vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
     from!"erupted".vkDestroyRenderPass(arg.device, arg.renderPass, null);
 
