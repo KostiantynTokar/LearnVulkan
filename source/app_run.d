@@ -75,6 +75,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createGraphicsPipeline
         .andThen!createFramebuffers
         .andThen!createCommandPool
+        .andThen!createCommandBuffers
         ;
 }
 
@@ -1078,17 +1079,17 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                         blendConstants : [ 0.0f, 0.0f, 0.0f, 0.0f ] // Optional
                     };
 
-                    const from!"erupted".VkDynamicState[2] dynamicStates =
-                    [
-                        from!"erupted".VK_DYNAMIC_STATE_VIEWPORT,
-                        from!"erupted".VK_DYNAMIC_STATE_LINE_WIDTH,
-                    ];
+                    // const from!"erupted".VkDynamicState[2] dynamicStates =
+                    // [
+                        // from!"erupted".VK_DYNAMIC_STATE_VIEWPORT,
+                        // from!"erupted".VK_DYNAMIC_STATE_LINE_WIDTH,
+                    // ];
 
-                    const from!"erupted".VkPipelineDynamicStateCreateInfo dynamicState =
-                    {
-                        dynamicStateCount : 2,
-                        pDynamicStates : dynamicStates.ptr,
-                    };
+                    // const from!"erupted".VkPipelineDynamicStateCreateInfo dynamicState =
+                    // {
+                    //     dynamicStateCount : 2,
+                    //     pDynamicStates : dynamicStates.ptr,
+                    // };
 
                     // Uniform variables and push constants
                     const from!"erupted".VkPipelineLayoutCreateInfo pipelineLayoutInfo =
@@ -1225,6 +1226,117 @@ auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
     return vkCreateCommandPool(arg.device, &poolInfo, null, &commandPool) == VK_SUCCESS
         ? ok(Res(forward!arg.expand, commandPool.move))
         : err!Res("Failed to create command pool.");
+}
+
+auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
+        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+        && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+        && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import std.range : enumerate;
+    import erupted : VK_SUCCESS, vkAllocateCommandBuffers, vkBeginCommandBuffer;
+    import expected : ok, err;
+    import automem : Vector;
+    
+    alias VectorType = Vector!(from!"erupted".VkCommandBuffer, Mallocator);
+    alias Res = TupleCat!(T, Tuple!(VectorType, "commandBuffers"));
+
+    VectorType commandBuffers;
+    commandBuffers.length = arg.swapChainFramebuffers.length;
+
+    const from!"erupted".VkCommandBufferAllocateInfo allocInfo =
+    {
+        commandPool : arg.commandPool,
+        // Primary - can be submitted to a queue, but cannot be called from other command buffers.
+        // Secondary - cannot be submitted directly, but can be called from primary command buffers.
+        level : from!"erupted".VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        commandBufferCount : cast(uint) commandBuffers.length,
+    };
+
+    if(vkAllocateCommandBuffers(arg.device, &allocInfo, commandBuffers.ptr) != VK_SUCCESS)
+    {
+        return err!Res("Failed to allocate command buffers.");
+    }
+
+    foreach(i, ref commandBuffer; commandBuffers[].enumerate)
+    {
+        const from!"erupted".VkCommandBufferBeginInfo beginInfo =
+        {
+            flags : 0
+                // Buffer will be rerecorded right after executing it once.
+                // | from!"erupted".VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+                // This is a secondary command buffer that will be entirely within a single render pass.
+                // | from!"erupted".VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT
+                // Command buffer can be resubmitted while it is pending execution.
+                // | from!"erupted".VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT
+                , // Optional
+            pInheritanceInfo : null, // Optional, for secondary buffer specifies what state to inherit from primary buffer.
+        };
+
+        if(vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+        {
+            return err!Res("Failed to begin recording command buffer.");
+        }
+
+        const from!"erupted".VkClearValue clearColor =
+        {
+            color :
+            {
+                float32 : [ 0.0f, 0.0f, 0.0f, 1.0f, ],
+            },
+        };
+        
+        const from!"erupted".VkRenderPassBeginInfo renderPassInfo =
+        {
+            renderPass : arg.renderPass,
+            framebuffer : arg.swapChainFramebuffers.ptr[i],
+            renderArea :
+            {
+                offset : {0, 0},
+                extent : arg.swapChainExtent,
+            },
+            clearValueCount : 1,
+            pClearValues : &clearColor,
+        };
+
+        // Inline - render pass commands embedded in the primary command buffer, no secondary buffers will be executed.
+        // Secondary command buffers - render pass commands will be executed from secondary buffers.
+        from!"erupted".vkCmdBeginRenderPass(
+            commandBuffer,
+            &renderPassInfo,
+            from!"erupted".VK_SUBPASS_CONTENTS_INLINE);
+
+        from!"erupted".vkCmdBindPipeline(
+            commandBuffer,
+            from!"erupted".VK_PIPELINE_BIND_POINT_GRAPHICS,
+            arg.graphicsPipeline);
+        
+        from!"erupted".vkCmdDraw(
+            commandBuffer,
+            3, // vertexCount.
+            1, // instanceCount
+            0, // firstVertex - lowest value of gl_VertexIndex
+            0, // firstInstance - lowest value of gl_InstanceIndex
+            );
+        
+        from!"erupted".vkCmdEndRenderPass(commandBuffer);
+
+        if(from!"erupted".vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+        {
+            return err!Res("Failed to record command buffer.");
+        }
+    }
+
+    return ok(Res(forward!arg.expand, commandBuffers.move));
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
