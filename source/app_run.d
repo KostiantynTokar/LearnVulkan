@@ -1196,6 +1196,10 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         "surface",
         "device",
         "swapChain",
+        "swapChainImageViews",
+        "renderPass",
+        "pipelineLayout",
+        "graphicsPipeline",
         validationLayersErasedNames,
         );
     return ok(forward!arg.erase!erasedNames);
