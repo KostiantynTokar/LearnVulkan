@@ -71,6 +71,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createSwapChain
         .andThen!getSwapChainImages
         .andThen!createImageViews
+        .andThen!createRenderPass
         .andThen!createGraphicsPipeline
         ;
 }
@@ -816,6 +817,63 @@ auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
     return ok(Res(forward!arg.expand, swapChainImageViews.move));
 }
 
+auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+        )
+{
+    import util : TupleCat;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import erupted : VkRenderPass, VK_SUCCESS;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkRenderPass, "renderPass"
+    ));
+
+    const from!"erupted".VkAttachmentDescription colorAttachment =
+    {
+        format : arg.swapChainImageFormat,
+        samples : from!"erupted".VK_SAMPLE_COUNT_1_BIT,
+        loadOp : from!"erupted".VK_ATTACHMENT_LOAD_OP_CLEAR,
+        storeOp : from!"erupted".VK_ATTACHMENT_STORE_OP_STORE,
+        stencilLoadOp : from!"erupted".VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        stencilStoreOp : from!"erupted".VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        initialLayout : from!"erupted".VK_IMAGE_LAYOUT_UNDEFINED,
+        finalLayout : from!"erupted".VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
+    };
+
+    const from!"erupted".VkAttachmentReference colorAttachmentRef =
+    {
+        attachment : 0, // Index in attachment array.
+        layout : from!"erupted".VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+
+    const from!"erupted".VkSubpassDescription subpass =
+    {
+        // Use for graphics.
+        pipelineBindPoint : from!"erupted".VK_PIPELINE_BIND_POINT_GRAPHICS,
+        colorAttachmentCount : 1,
+        // Index in this array referenced from the fragment shader layout(location=0) out vec4 outColor directive.
+        pColorAttachments : &colorAttachmentRef,
+    };
+
+    const from!"erupted".VkRenderPassCreateInfo renderPassInfo =
+    {
+        attachmentCount : 1,
+        pAttachments : &colorAttachment,
+        subpassCount : 1,
+        pSubpasses : &subpass,
+    };
+
+    VkRenderPass renderPass;
+    return from!"erupted".vkCreateRenderPass(arg.device, &renderPassInfo, null, &renderPass) == VK_SUCCESS
+        ? ok(Res(forward!arg.expand, renderPass.move))
+        : err!Res("Failed to create render pass.");
+}
+
 auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code) nothrow @nogc @trusted
     in(cast(ptrdiff_t) code.ptr % 4 == 0)
 {
@@ -1053,6 +1111,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
         && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
+        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
         && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
         )
 {
@@ -1064,6 +1123,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import expected : ok;
 
     from!"erupted".vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
+    from!"erupted".vkDestroyRenderPass(arg.device, arg.renderPass, null);
 
     foreach(ref imageView; arg.swapChainImageViews)
     {
