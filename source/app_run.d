@@ -92,22 +92,25 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
     
     alias Res = TupleCat!(T, Tuple!(VkInstance, "instance"));
 
-    VkApplicationInfo appInfo;
-    appInfo.pApplicationName = "Hello Triangle";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    appInfo.pEngineName = "No engine";
-    appInfo.engineVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
-
-    VkInstanceCreateInfo createInfo;
-    createInfo.pApplicationInfo = &appInfo;
+    const VkApplicationInfo appInfo =
+    {
+        pApplicationName : "Hello Triangle",
+        applicationVersion : VK_MAKE_API_VERSION(0, 1, 0, 0),
+        pEngineName : "No engine",
+        engineVersion : VK_MAKE_API_VERSION(0, 1, 0, 0),
+        apiVersion : VK_API_VERSION_1_0,
+    };
 
     auto extensionNamesRange = getRequiredExtensions();
     auto extensions = Mallocator.instance.makeArray!(const(char)*)(extensionNamesRange);
     scope(exit) () @trusted { Mallocator.instance.dispose(extensions); }();
 
-    createInfo.enabledExtensionCount = cast(uint) extensions.length;
-    createInfo.ppEnabledExtensionNames = extensions.ptr;
+    VkInstanceCreateInfo createInfo =
+    {
+        pApplicationInfo : &appInfo,
+        enabledExtensionCount : cast(uint) extensions.length,
+        ppEnabledExtensionNames : extensions.ptr,
+    };
 
     debug(LearnVulkan_ValidationLayers)
     {
@@ -212,19 +215,21 @@ debug(LearnVulkan_ValidationLayers)
 
     auto defaultDebugMessengerCreateInfo() pure nothrow @nogc @trusted
     {
-        from!"erupted".VkDebugUtilsMessengerCreateInfoEXT createInfo;
-        createInfo.messageSeverity = 0
-            // | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
-            // | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
-            ;
-        createInfo.messageType = 0
-            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
-            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
-            | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
-            ;
-        createInfo.pfnUserCallback = &debugCallback;
-        createInfo.pUserData = null;
+        const from!"erupted".VkDebugUtilsMessengerCreateInfoEXT createInfo=
+        {
+            messageSeverity : 0
+                // | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+                // | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+                | from!"erupted".VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
+                ,
+            messageType : 0
+                | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+                | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+                | from!"erupted".VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
+                ,
+            pfnUserCallback : &debugCallback,
+            pUserData : null,
+        };
         return createInfo;
     }
 
@@ -241,7 +246,7 @@ debug(LearnVulkan_ValidationLayers)
         
         alias Res = TupleCat!(T, Tuple!(VkDebugUtilsMessengerEXT, "debugMessenger"));
 
-        auto createInfo = defaultDebugMessengerCreateInfo();
+        const createInfo = defaultDebugMessengerCreateInfo();
 
         VkDebugUtilsMessengerEXT debugMessenger;
 
@@ -627,17 +632,19 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
         ++uniqueFamiliesCount;
     }
 
-    from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
+    const from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
 
-    from!"erupted".VkDeviceCreateInfo createInfo;
+    from!"erupted".VkDeviceCreateInfo createInfo =
+    {
+        pQueueCreateInfos : queueCreateInfos.ptr,
+        queueCreateInfoCount : uniqueFamiliesCount,
 
-    createInfo.pQueueCreateInfos = queueCreateInfos.ptr;
-    createInfo.queueCreateInfoCount = uniqueFamiliesCount;
+        pEnabledFeatures : &deviceFeatures,
 
-    createInfo.pEnabledFeatures = &deviceFeatures;
+        enabledExtensionCount : deviceExtensions.length,
+        ppEnabledExtensionNames : deviceExtensions.ptr,
+    };
 
-    createInfo.enabledExtensionCount = deviceExtensions.length;
-    createInfo.ppEnabledExtensionNames = deviceExtensions.ptr;
 
     static if(validationLayersEnabled)
     {
@@ -698,21 +705,34 @@ auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
         VkExtent2D, "swapChainExtent",
         ));
 
-    from!"erupted".VkSwapchainCreateInfoKHR createInfo;
+    from!"erupted".VkSwapchainCreateInfoKHR createInfo =
+    {
+        surface : arg.surface,
+        minImageCount : arg.chosenSwapChainSupport.imageCount,
+        imageFormat : arg.chosenSwapChainSupport.surfaceFormat.format,
+        imageColorSpace : arg.chosenSwapChainSupport.surfaceFormat.colorSpace,
+        imageExtent : arg.chosenSwapChainSupport.extent,
+        // Always 1 unless for stereoscopic 3D application.
+        imageArrayLayers : 1,
+        // Render directly to imega. Use VK_IMAGE_USAGE_TRANSFER_DST_BIT for off-screen rendering.
+        imageUsage : from!"erupted".VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        // Do not want any transforms applied to swap chain images.
+        preTransform : arg.chosenSwapChainSupport.capabilities.currentTransform,
+        // Blending with other windows in the window system.
+        compositeAlpha : from!"erupted".VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        presentMode : arg.chosenSwapChainSupport.presentMode,
+        // Do not render obscured pixels.
+        clipped : from!"erupted".VK_TRUE,
+        oldSwapchain : from!"erupted".VK_NULL_HANDLE,
+    };
 
-    createInfo.surface = arg.surface;
-    createInfo.minImageCount = arg.chosenSwapChainSupport.imageCount;
-    createInfo.imageFormat = arg.chosenSwapChainSupport.surfaceFormat.format;
-    createInfo.imageColorSpace = arg.chosenSwapChainSupport.surfaceFormat.colorSpace;
-    createInfo.imageExtent = arg.chosenSwapChainSupport.extent;
-    // Always 1 unless for stereoscopic 3D application.
-    createInfo.imageArrayLayers = 1;
-    // Render directly to imega. Use VK_IMAGE_USAGE_TRANSFER_DST_BIT for off-screen rendering.
-    createInfo.imageUsage = from!"erupted".VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-    const uint[2] queueFamilyIndicesArr = [arg.queueFamilyIndices.graphicsFamily, arg.queueFamilyIndices.presentFamily];
     if(arg.queueFamilyIndices.graphicsFamily != arg.queueFamilyIndices.presentFamily)
     {
+        const uint[2] queueFamilyIndicesArr =
+        [
+            arg.queueFamilyIndices.graphicsFamily,
+            arg.queueFamilyIndices.presentFamily,
+        ];
         // Can be exclusive (more performant), but it requires explicit ownership control.
         createInfo.imageSharingMode = from!"erupted".VK_SHARING_MODE_CONCURRENT;
         createInfo.queueFamilyIndexCount = 2;
@@ -724,18 +744,6 @@ auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
         createInfo.queueFamilyIndexCount = 0; // Optional
         createInfo.pQueueFamilyIndices = null; // Optional
     }
-
-    // Do not want any transforms applied to swap chain images.
-    createInfo.preTransform = arg.chosenSwapChainSupport.capabilities.currentTransform;
-
-    // Blending with other windows in the window system.
-    createInfo.compositeAlpha = from!"erupted".VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    
-    createInfo.presentMode = arg.chosenSwapChainSupport.presentMode;
-    // Do not render obscured pixels.
-    createInfo.clipped = from!"erupted".VK_TRUE;
-
-    createInfo.oldSwapchain = from!"erupted".VK_NULL_HANDLE;
 
     VkSwapchainKHR swapChain;
     return from!"erupted".vkCreateSwapchainKHR(arg.device, &createInfo, null, &swapChain) == from!"erupted".VK_SUCCESS
@@ -790,22 +798,30 @@ auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
 
     foreach(i, ref image; arg.swapChainImages[].enumerate)
     {
-        from!"erupted".VkImageViewCreateInfo createInfo;
-        createInfo.image = image;
-        createInfo.viewType = from!"erupted".VK_IMAGE_VIEW_TYPE_2D;
-        createInfo.format = arg.swapChainImageFormat;
+        const from!"erupted".VkImageViewCreateInfo createInfo =
+        {
+            image : image,
+            viewType : from!"erupted".VK_IMAGE_VIEW_TYPE_2D,
+            format : arg.swapChainImageFormat,
 
-        createInfo.components.r = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.g = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.b = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.a = from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY;
+            components : 
+            {
+                r : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
+                g : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
+                b : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
+                a : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
+            },
 
-        createInfo.subresourceRange.aspectMask = from!"erupted".VK_IMAGE_ASPECT_COLOR_BIT;
-        createInfo.subresourceRange.baseMipLevel = 0;
-        createInfo.subresourceRange.levelCount = 1;
-        createInfo.subresourceRange.baseArrayLayer = 0;
-        // More then 1 for stereographic 3D application.
-        createInfo.subresourceRange.layerCount = 1;
+            subresourceRange :
+            {
+                aspectMask : from!"erupted".VK_IMAGE_ASPECT_COLOR_BIT,
+                baseMipLevel : 0,
+                levelCount : 1,
+                baseArrayLayer : 0,
+                // More then 1 for stereographic 3D application.
+                layerCount : 1,
+            },
+        };
 
         if(from!"erupted".vkCreateImageView(arg.device, &createInfo, null, &swapChainImageViews.ptr[i])
             != from!"erupted".VK_SUCCESS)
@@ -881,9 +897,11 @@ auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code)
     
     alias Res = from!"erupted".VkShaderModule;
 
-    from!"erupted".VkShaderModuleCreateInfo createInfo;
-    createInfo.codeSize = code.length;
-    createInfo.pCode = cast(const(uint)*) code.ptr;
+    const from!"erupted".VkShaderModuleCreateInfo createInfo =
+    {
+        codeSize : code.length,
+        pCode : cast(const(uint)*) code.ptr,
+    };
 
     from!"erupted".VkShaderModule shaderModule;
     return from!"erupted".vkCreateShaderModule(device, &createInfo, null, &shaderModule) == from!"erupted".VK_SUCCESS
