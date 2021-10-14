@@ -902,6 +902,7 @@ auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
 auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code) nothrow @nogc @trusted
     in(cast(ptrdiff_t) code.ptr % 4 == 0)
 {
+    import core.lifetime : move;
     import expected : ok, err;
     
     alias Res = from!"erupted".VkShaderModule;
@@ -914,7 +915,7 @@ auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code)
 
     from!"erupted".VkShaderModule shaderModule;
     return from!"erupted".vkCreateShaderModule(device, &createInfo, null, &shaderModule) == from!"erupted".VK_SUCCESS
-        ? ok(shaderModule)
+        ? ok(shaderModule.move)
         : err!Res("Failed to create shader module");
 }
 
@@ -947,7 +948,7 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import erupted : VkPipelineLayout, VkPipeline, vkDestroyShaderModule, VK_FALSE, VK_TRUE, VK_SUCCESS;
-    import expected : ok, err, andThen;
+    import expected : ok, err, andThen, orElse;
 
     alias Res = TupleCat!(T, Tuple!
         (
@@ -958,12 +959,9 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
     return createShaderModule(arg.device, "shaders_bin/vert.spv")
         .andThen!((vertShaderModule) @trusted
         {
-            scope(exit) vkDestroyShaderModule(arg.device, vertShaderModule, null);
             return createShaderModule(arg.device, "shaders_bin/frag.spv")
                 .andThen!((fragShaderModule) @trusted
                 {
-                    scope(exit) vkDestroyShaderModule(arg.device, fragShaderModule, null);
-
                     const from!"erupted".VkPipelineShaderStageCreateInfo[2] shaderStageInfos =
                     [
                         {
@@ -1137,9 +1135,17 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                     {
                         return err!Res("Failed to create graphics pipeline.");
                     }
+
+                    vkDestroyShaderModule(arg.device, fragShaderModule, null);
                     
                     return ok(Res(forward!arg.expand, pipelineLayout.move, graphicsPipeline.move));
-                });
+                })
+                .orElse!((msg)
+                {
+                    vkDestroyShaderModule(arg.device, vertShaderModule, null);
+                    return err!Res(msg);
+                })
+                ;
         });
 }
 
