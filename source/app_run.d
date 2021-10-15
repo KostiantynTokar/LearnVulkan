@@ -1400,6 +1400,7 @@ auto ref createSemaphores(T)(auto ref T arg) nothrow @nogc @trusted
 auto drawFrame(VkCommandBufferArray)(
     from!"erupted".VkDevice device,
     from!"erupted".VkQueue graphicsQueue,
+    from!"erupted".VkQueue presentQueue,
     from!"erupted".VkSwapchainKHR swapChain,
     from!"erupted".VkSemaphore imageAvailableSemaphore,
     from!"erupted".VkSemaphore renderFinishedSemaphore,
@@ -1438,9 +1439,27 @@ auto drawFrame(VkCommandBufferArray)(
         pSignalSemaphores : &renderFinishedSemaphore,
     };
 
-    return vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) == VK_SUCCESS
-        ? ok()
-        : err("Failed to submit draw command buffer.");
+    if(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
+    {
+        return err("Failed to submit draw command buffer.");
+    }
+
+    const from!"erupted".VkPresentInfoKHR presentInfo =
+    {
+        waitSemaphoreCount : 1,
+        pWaitSemaphores : &renderFinishedSemaphore,
+
+        swapchainCount : 1,
+        pSwapchains : &swapChain,
+        pImageIndices : &imageIndex,
+
+        // Array of VkResult, usefull when there are multiple swapchains. Otherwise just check the return value.
+        pResults : null,
+    };
+
+    from!"erupted".vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    return ok();
 }
 
 auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
@@ -1448,6 +1467,7 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
+        && is(typeof(arg.presentQueue) : from!"erupted".VkQueue)
         && is(typeof(arg.imageAvailableSemaphore) : from!"erupted".VkSemaphore)
         && is(typeof(arg.renderFinishedSemaphore) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
@@ -1461,15 +1481,17 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     {
         glfwPollEvents();
         auto exp = drawFrame(
-            arg.device, arg.graphicsQueue, arg.swapChain,
+            arg.device, arg.graphicsQueue, arg.presentQueue, arg.swapChain,
             arg.imageAvailableSemaphore, arg.renderFinishedSemaphore,
             arg.commandBuffers);
         if(!exp)
         {
+            from!"erupted".vkDeviceWaitIdle(arg.device);
             return err!T(exp.error);
         }
     }
 
+    from!"erupted".vkDeviceWaitIdle(arg.device);
     return ok(forward!arg);
 }
 
