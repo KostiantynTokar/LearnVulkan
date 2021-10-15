@@ -30,6 +30,8 @@ else
 enum WindowWidth = 800;
 enum WindowHeight = 600;
 
+enum MaxFramesInFlight = 3;
+
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T)
 {
@@ -1376,22 +1378,28 @@ auto ref createSemaphores(T)(auto ref T arg) nothrow @nogc @trusted
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(
-        VkSemaphore, "imageAvailableSemaphore",
-        VkSemaphore, "renderFinishedSemaphore",
+        VkSemaphore[MaxFramesInFlight], "imageAvailableSemaphores",
+        VkSemaphore[MaxFramesInFlight], "renderFinishedSemaphores",
     ));
 
 
-    VkSemaphore[2] semaphores;
+    VkSemaphore[MaxFramesInFlight][2] semaphores;
     foreach(i; 0 .. semaphores.length)
     {
-        const VkSemaphoreCreateInfo semaphoreInfo;
-        if(vkCreateSemaphore(arg.device, &semaphoreInfo, null, &semaphores[i]) != VK_SUCCESS)
+        foreach(j; 0 .. MaxFramesInFlight)
         {
-            foreach(j; 0 .. i)
+            const VkSemaphoreCreateInfo semaphoreInfo;
+            if(vkCreateSemaphore(arg.device, &semaphoreInfo, null, &semaphores[i][j]) != VK_SUCCESS)
             {
-                vkDestroySemaphore(arg.device, semaphores[j], null);
+                foreach(k; 0 .. i + 1)
+                {
+                    foreach(l; 0 .. j)
+                    {
+                        vkDestroySemaphore(arg.device, semaphores[k][l], null);
+                    }
+                }
+                return err!Res("Failed to create semaphore.");
             }
-            return err!Res("Failed to create semaphore.");
         }
     }
 
@@ -1403,9 +1411,10 @@ auto drawFrame(VkCommandBufferArray)(
     from!"erupted".VkQueue graphicsQueue,
     from!"erupted".VkQueue presentQueue,
     from!"erupted".VkSwapchainKHR swapChain,
-    from!"erupted".VkSemaphore imageAvailableSemaphore,
-    from!"erupted".VkSemaphore renderFinishedSemaphore,
+    auto ref from!"erupted".VkSemaphore[MaxFramesInFlight] imageAvailableSemaphores,
+    auto ref from!"erupted".VkSemaphore[MaxFramesInFlight] renderFinishedSemaphores,
     auto ref VkCommandBufferArray commandBuffers,
+    immutable size_t currentFrame,
     ) nothrow @nogc @trusted
     if(is(from!"std.range".ElementType!(typeof(commandBuffers[])) : from!"erupted".VkCommandBuffer))
 {
@@ -1417,7 +1426,7 @@ auto drawFrame(VkCommandBufferArray)(
         device,
         swapChain,
         ulong.max, // Timeout in nanoseconds. 64 unsigned max disables timeout.
-        imageAvailableSemaphore,
+        imageAvailableSemaphores[currentFrame],
         VK_NULL_HANDLE, // Fence.
         &imageIndex,
         );
@@ -1430,14 +1439,14 @@ auto drawFrame(VkCommandBufferArray)(
     const from!"erupted".VkSubmitInfo submitInfo =
     {
         waitSemaphoreCount : 1,
-        pWaitSemaphores : &imageAvailableSemaphore,
+        pWaitSemaphores : &imageAvailableSemaphores[currentFrame],
         pWaitDstStageMask : waitStages.ptr,
 
         commandBufferCount : 1,
         pCommandBuffers : &commandBuffers.ptr[imageIndex], // TODO: get rid of ptr.
 
         signalSemaphoreCount : 1,
-        pSignalSemaphores : &renderFinishedSemaphore,
+        pSignalSemaphores : &renderFinishedSemaphores[currentFrame],
     };
 
     if(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
@@ -1448,7 +1457,7 @@ auto drawFrame(VkCommandBufferArray)(
     const from!"erupted".VkPresentInfoKHR presentInfo =
     {
         waitSemaphoreCount : 1,
-        pWaitSemaphores : &renderFinishedSemaphore,
+        pWaitSemaphores : &renderFinishedSemaphores[currentFrame],
 
         swapchainCount : 1,
         pSwapchains : &swapChain,
@@ -1469,8 +1478,8 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
         && is(typeof(arg.presentQueue) : from!"erupted".VkQueue)
-        && is(typeof(arg.imageAvailableSemaphore) : from!"erupted".VkSemaphore)
-        && is(typeof(arg.renderFinishedSemaphore) : from!"erupted".VkSemaphore)
+        && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
+        && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
         )
 {
@@ -1478,18 +1487,22 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     import glfw_vulkan : glfwWindowShouldClose, glfwPollEvents;
     import expected : ok, err;
 
+    size_t currentFrame = 0;
+
     while(!glfwWindowShouldClose(arg.window))
     {
         glfwPollEvents();
         auto exp = drawFrame(
             arg.device, arg.graphicsQueue, arg.presentQueue, arg.swapChain,
-            arg.imageAvailableSemaphore, arg.renderFinishedSemaphore,
-            arg.commandBuffers);
+            arg.imageAvailableSemaphores, arg.renderFinishedSemaphores,
+            arg.commandBuffers, currentFrame);
         if(!exp)
         {
             from!"erupted".vkDeviceWaitIdle(arg.device);
             return err!T(exp.error);
         }
+
+        currentFrame = (currentFrame + 1) % MaxFramesInFlight;
     }
 
     from!"erupted".vkDeviceWaitIdle(arg.device);
@@ -1511,8 +1524,8 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
         && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
         && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
-        && is(typeof(arg.imageAvailableSemaphore) : from!"erupted".VkSemaphore)
-        && is(typeof(arg.renderFinishedSemaphore) : from!"erupted".VkSemaphore)
+        && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
+        && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
         )
 {
     import util : erase;
@@ -1522,8 +1535,11 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok;
 
-    from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphore, null);
-    from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphore, null);
+    foreach(i; 0 .. MaxFramesInFlight)
+    {
+        from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphores[i], null);
+        from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
+    }
 
     from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
@@ -1579,8 +1595,8 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         "graphicsPipeline",
         "swapChainFramebuffers",
         "commandPool",
-        "imageAvailableSemaphore",
-        "renderFinishedSemaphore",
+        "imageAvailableSemaphores",
+        "renderFinishedSemaphores",
         validationLayersErasedNames,
         );
     return ok(forward!arg.erase!erasedNames);
