@@ -1153,6 +1153,7 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                         return err!Res("Failed to create graphics pipeline.");
                     }
 
+                    vkDestroyShaderModule(arg.device, vertShaderModule, null);
                     vkDestroyShaderModule(arg.device, fragShaderModule, null);
                     
                     return ok(Res(forward!arg.expand, pipelineLayout.move, graphicsPipeline.move));
