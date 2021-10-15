@@ -70,19 +70,12 @@ template erase(memberNames...)
         static auto genCode(in bool[T.Types.length] remaining)
         {
             import std.conv : to;
-            string[] args;
+            string argsStr;
             foreach(i, remains; remaining)
             {
-                if(remains) args ~= ["forward!t[" ~ i.to!string ~ "]"];
+                // TODO: forwarding args one by one is ill-formed; after first forward t is init.
+                if(remains) argsStr ~= "t[" ~ i.to!string ~ "], ";
             }
-            auto argsStr = "";
-            if(args.length != 0)
-            {
-                argsStr ~= args[0];
-                args = args[1 .. $];
-            }
-            foreach(arg; args)
-                argsStr ~= ", " ~ arg;
             return q{return TupleEraseImpl!(T, remaining)(} ~ argsStr ~ ");";
         }
         enum remaining = calcRemaining!(T, memberNames)();
