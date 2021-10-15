@@ -1414,7 +1414,10 @@ auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
             }
         }
 
-        const from!"erupted".VkFenceCreateInfo fenceInfo;
+        const from!"erupted".VkFenceCreateInfo fenceInfo =
+        {
+            flags : from!"erupted".VK_FENCE_CREATE_SIGNALED_BIT,
+        };
         if(from!"erupted".vkCreateFence(arg.device, &fenceInfo, null, &inFlightFences[i]) != VK_SUCCESS)
         {
             destroyCreatedObjects(i, semaphores.length);
@@ -1432,13 +1435,20 @@ auto drawFrame(VkCommandBufferArray)(
     from!"erupted".VkSwapchainKHR swapChain,
     auto ref from!"erupted".VkSemaphore[MaxFramesInFlight] imageAvailableSemaphores,
     auto ref from!"erupted".VkSemaphore[MaxFramesInFlight] renderFinishedSemaphores,
+    auto ref from!"erupted".VkFence[MaxFramesInFlight] inFlightFences,
     auto ref VkCommandBufferArray commandBuffers,
     immutable size_t currentFrame,
     ) nothrow @nogc @trusted
     if(is(from!"std.range".ElementType!(typeof(commandBuffers[])) : from!"erupted".VkCommandBuffer))
 {
-    import erupted : vkQueueSubmit, VK_NULL_HANDLE, VK_SUCCESS;
+    import erupted : vkQueueSubmit, VK_NULL_HANDLE, VK_SUCCESS, VK_TRUE;
     import expected : ok, err;
+
+    from!"erupted".vkWaitForFences(device, 1, &inFlightFences[currentFrame],
+        VK_TRUE, // Whether to wait all fences in the array or any of the fences.
+        ulong.max
+        );
+    from!"erupted".vkResetFences(device, 1, &inFlightFences[currentFrame]);
     
     uint imageIndex;
     from!"erupted".vkAcquireNextImageKHR(
@@ -1468,7 +1478,7 @@ auto drawFrame(VkCommandBufferArray)(
         pSignalSemaphores : &renderFinishedSemaphores[currentFrame],
     };
 
-    if(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
+    if(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS)
     {
         return err("Failed to submit draw command buffer.");
     }
@@ -1500,6 +1510,7 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
+        && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
         )
 {
     import core.lifetime : forward;
@@ -1513,7 +1524,7 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         glfwPollEvents();
         auto exp = drawFrame(
             arg.device, arg.graphicsQueue, arg.presentQueue, arg.swapChain,
-            arg.imageAvailableSemaphores, arg.renderFinishedSemaphores,
+            arg.imageAvailableSemaphores, arg.renderFinishedSemaphores, arg.inFlightFences,
             arg.commandBuffers, currentFrame);
         if(!exp)
         {
