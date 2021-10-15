@@ -1369,19 +1369,28 @@ auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
 auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
         )
 {
     import util : TupleCat;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
+    import std.experimental.allocator.mallocator : Mallocator;
     import erupted : VkSemaphore, VkFence, VK_SUCCESS;
+    import automem : Vector;
     import expected : ok, err;
+
+    alias VectorType = Vector!(VkFence, Mallocator);
 
     alias Res = TupleCat!(T, Tuple!(
         VkSemaphore[MaxFramesInFlight], "imageAvailableSemaphores",
         VkSemaphore[MaxFramesInFlight], "renderFinishedSemaphores",
         VkFence[MaxFramesInFlight], "inFlightFences",
+        VectorType, "imagesInFlight",
     ));
+
+    VectorType imagesInFlight;
+    imagesInFlight.length = arg.swapChainImages.length;
 
     VkSemaphore[MaxFramesInFlight][2] semaphores;
     VkFence[MaxFramesInFlight] inFlightFences;
@@ -1425,10 +1434,14 @@ auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
         }
     }
 
-    return ok(Res(forward!arg.expand, semaphores[0].move, semaphores[1].move, inFlightFences.move));
+    return ok(Res(
+        forward!arg.expand,
+        semaphores[0].move, semaphores[1].move,
+        inFlightFences.move, imagesInFlight.move
+        ));
 }
 
-auto drawFrame(VkCommandBufferArray)(
+auto drawFrame(VkCommandBufferArray, VkFenceArray)(
     from!"erupted".VkDevice device,
     from!"erupted".VkQueue graphicsQueue,
     from!"erupted".VkQueue presentQueue,
@@ -1436,10 +1449,13 @@ auto drawFrame(VkCommandBufferArray)(
     auto ref from!"erupted".VkSemaphore[MaxFramesInFlight] imageAvailableSemaphores,
     auto ref from!"erupted".VkSemaphore[MaxFramesInFlight] renderFinishedSemaphores,
     auto ref from!"erupted".VkFence[MaxFramesInFlight] inFlightFences,
+    auto ref VkFenceArray imagesInFlight,
     auto ref VkCommandBufferArray commandBuffers,
     immutable size_t currentFrame,
     ) nothrow @nogc @trusted
-    if(is(from!"std.range".ElementType!(typeof(commandBuffers[])) : from!"erupted".VkCommandBuffer))
+    if(is(from!"std.range".ElementType!(typeof(commandBuffers[])) : from!"erupted".VkCommandBuffer)
+        && is(from!"std.range".ElementType!(typeof(imagesInFlight[])) : from!"erupted".VkFence)
+        )
 {
     import erupted : vkQueueSubmit, VK_NULL_HANDLE, VK_SUCCESS, VK_TRUE;
     import expected : ok, err;
@@ -1448,7 +1464,6 @@ auto drawFrame(VkCommandBufferArray)(
         VK_TRUE, // Whether to wait all fences in the array or any of the fences.
         ulong.max
         );
-    from!"erupted".vkResetFences(device, 1, &inFlightFences[currentFrame]);
     
     uint imageIndex;
     from!"erupted".vkAcquireNextImageKHR(
@@ -1459,6 +1474,16 @@ auto drawFrame(VkCommandBufferArray)(
         VK_NULL_HANDLE, // Fence.
         &imageIndex,
         );
+    
+    if(imagesInFlight.ptr[imageIndex] != VK_NULL_HANDLE)
+    {
+        from!"erupted".vkWaitForFences(device, 1, &imagesInFlight.ptr[imageIndex],
+            VK_TRUE, // Whether to wait all fences in the array or any of the fences.
+            ulong.max
+            );
+    }
+
+    imagesInFlight.ptr[imageIndex] = inFlightFences[currentFrame];
     
     const from!"erupted".VkPipelineStageFlags[1] waitStages =
     [
@@ -1478,6 +1503,7 @@ auto drawFrame(VkCommandBufferArray)(
         pSignalSemaphores : &renderFinishedSemaphores[currentFrame],
     };
 
+    from!"erupted".vkResetFences(device, 1, &inFlightFences[currentFrame]);
     if(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS)
     {
         return err("Failed to submit draw command buffer.");
@@ -1511,6 +1537,7 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
         && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
+        && is(from!"std.range".ElementType!(typeof(arg.imagesInFlight[])) : from!"erupted".VkFence)
         )
 {
     import core.lifetime : forward;
@@ -1524,7 +1551,8 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         glfwPollEvents();
         auto exp = drawFrame(
             arg.device, arg.graphicsQueue, arg.presentQueue, arg.swapChain,
-            arg.imageAvailableSemaphores, arg.renderFinishedSemaphores, arg.inFlightFences,
+            arg.imageAvailableSemaphores, arg.renderFinishedSemaphores,
+            arg.inFlightFences, arg.imagesInFlight,
             arg.commandBuffers, currentFrame);
         if(!exp)
         {
