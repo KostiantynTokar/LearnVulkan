@@ -78,7 +78,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createFramebuffers
         .andThen!createCommandPool
         .andThen!createCommandBuffers
-        .andThen!createSemaphores
+        .andThen!createSyncObjects
         ;
 }
 
@@ -1366,7 +1366,7 @@ auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
     return ok(Res(forward!arg.expand, commandBuffers.move));
 }
 
-auto ref createSemaphores(T)(auto ref T arg) nothrow @nogc @trusted
+auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.device) : from!"erupted".VkDevice)
         )
@@ -1374,36 +1374,55 @@ auto ref createSemaphores(T)(auto ref T arg) nothrow @nogc @trusted
     import util : TupleCat;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
-    import erupted : VkSemaphore, VkSemaphoreCreateInfo, vkCreateSemaphore, vkDestroySemaphore, VK_SUCCESS;
+    import erupted : VkSemaphore, VkFence, VK_SUCCESS;
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(
         VkSemaphore[MaxFramesInFlight], "imageAvailableSemaphores",
         VkSemaphore[MaxFramesInFlight], "renderFinishedSemaphores",
+        VkFence[MaxFramesInFlight], "inFlightFences",
     ));
 
-
     VkSemaphore[MaxFramesInFlight][2] semaphores;
-    foreach(i; 0 .. semaphores.length)
+    VkFence[MaxFramesInFlight] inFlightFences;
+
+    void destroyCreatedObjects(immutable size_t i, immutable size_t j)
     {
-        foreach(j; 0 .. MaxFramesInFlight)
+        foreach(k; 0 .. i)
         {
-            const VkSemaphoreCreateInfo semaphoreInfo;
-            if(vkCreateSemaphore(arg.device, &semaphoreInfo, null, &semaphores[i][j]) != VK_SUCCESS)
+            foreach(l; 0 .. semaphores.length)
             {
-                foreach(k; 0 .. i + 1)
-                {
-                    foreach(l; 0 .. j)
-                    {
-                        vkDestroySemaphore(arg.device, semaphores[k][l], null);
-                    }
-                }
-                return err!Res("Failed to create semaphore.");
+                from!"erupted".vkDestroySemaphore(arg.device, semaphores[l][k], null);
             }
+            from!"erupted".vkDestroyFence(arg.device, inFlightFences[k], null);
+        }
+        foreach(l; 0 .. j)
+        {
+            from!"erupted".vkDestroySemaphore(arg.device, semaphores[l][i], null);
         }
     }
 
-    return ok(Res(forward!arg.expand, semaphores[0].move, semaphores[1].move));
+    foreach(i; 0 .. MaxFramesInFlight)
+    {
+        foreach(j; 0 .. semaphores.length)
+        {
+            const from!"erupted".VkSemaphoreCreateInfo semaphoreInfo;
+            if(from!"erupted".vkCreateSemaphore(arg.device, &semaphoreInfo, null, &semaphores[j][i]) != VK_SUCCESS)
+            {
+                destroyCreatedObjects(i, j);
+                return err!Res("Failed to create semaphore.");
+            }
+        }
+
+        const from!"erupted".VkFenceCreateInfo fenceInfo;
+        if(from!"erupted".vkCreateFence(arg.device, &fenceInfo, null, &inFlightFences[i]) != VK_SUCCESS)
+        {
+            destroyCreatedObjects(i, semaphores.length);
+            return err!Res("Failed to create fence.");
+        }
+    }
+
+    return ok(Res(forward!arg.expand, semaphores[0].move, semaphores[1].move, inFlightFences.move));
 }
 
 auto drawFrame(VkCommandBufferArray)(
@@ -1526,6 +1545,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
         && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
+        && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
         )
 {
     import util : erase;
@@ -1537,6 +1557,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 
     foreach(i; 0 .. MaxFramesInFlight)
     {
+        from!"erupted".vkDestroyFence(arg.device, arg.inFlightFences[i], null);
         from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphores[i], null);
         from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
     }
@@ -1597,6 +1618,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         "commandPool",
         "imageAvailableSemaphores",
         "renderFinishedSemaphores",
+        "inFlightFences",
         validationLayersErasedNames,
         );
     return ok(forward!arg.erase!erasedNames);
