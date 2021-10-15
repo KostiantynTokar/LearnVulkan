@@ -27,8 +27,8 @@ else
     enum validationLayersEnabled = false;
 }
 
-enum WindowWidth = 800;
-enum WindowHeight = 600;
+enum StartWindowWidth = 800;
+enum StartWindowHeight = 600;
 
 enum MaxFramesInFlight = 3;
 
@@ -48,7 +48,7 @@ auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    auto window = glfwCreateWindow(WindowWidth, WindowHeight, "LearnVulkan", null, null);
+    auto window = glfwCreateWindow(StartWindowWidth, StartWindowHeight, "LearnVulkan", null, null);
     return ok(Res(forward!arg.expand, window.move));
 }
 
@@ -462,10 +462,12 @@ from!"erupted".VkPresentModeKHR chooseSwapPresentMode(VkPresentModeKHRArray)(
 }
 
 from!"erupted".VkExtent2D chooseSwapExtent(
+    from!"glfw_vulkan".GLFWwindow* window,
     const ref from!"erupted".VkSurfaceCapabilitiesKHR capabilities
     ) nothrow @nogc @trusted
 {
     import std.algorithm : clamp;
+    import glfw_vulkan : glfwGetFramebufferSize;
 
     if(capabilities.currentExtent.width != uint.max)
     {
@@ -473,14 +475,18 @@ from!"erupted".VkExtent2D chooseSwapExtent(
         return capabilities.currentExtent;
     }
 
+    int width;
+    int height;
+    glfwGetFramebufferSize(window, &width, &height);
+
     from!"erupted".VkExtent2D actualExtent;
 
-    actualExtent.width = WindowWidth
+    actualExtent.width = width
         .clamp(
             capabilities.minImageExtent.width,
             capabilities.maxImageExtent.width
             );
-    actualExtent.height = WindowHeight
+    actualExtent.height = height
         .clamp(
             capabilities.minImageExtent.height,
             capabilities.maxImageExtent.height
@@ -589,7 +595,7 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
                 swapChainSupport.capabilities,
                 chooseSwapSurfaceFormat(swapChainSupport.formats),
                 chooseSwapPresentMode(swapChainSupport.presentModes),
-                chooseSwapExtent(swapChainSupport.capabilities),
+                chooseSwapExtent(elem[1].window, swapChainSupport.capabilities),
                 chooseImageCount(swapChainSupport.capabilities)
             );
             immutable indices = findQueueFamilies(elem[0], elem[1].surface);
