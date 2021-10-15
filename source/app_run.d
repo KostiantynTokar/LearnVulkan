@@ -70,14 +70,7 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!createLogicalDevice
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
         .andThen!getDeviceQueues
-        .andThen!createSwapChain
-        .andThen!getSwapChainImages
-        .andThen!createImageViews
-        .andThen!createRenderPass
-        .andThen!createGraphicsPipeline
-        .andThen!createFramebuffers
-        .andThen!createCommandPool
-        .andThen!createCommandBuffers
+        .andThen!createSwapChainAndRelatedObjects
         .andThen!createSyncObjects
         ;
 }
@@ -689,6 +682,46 @@ auto ref getDeviceQueues(T)(auto ref T arg) nothrow @nogc @trusted
     vkGetDeviceQueue(arg.device, arg.queueFamilyIndices.presentFamily, 0, &presentQueue);
 
     return from!"expected".ok(Res(forward!arg.expand, graphicsQueue.move, presentQueue.move));
+}
+
+auto ref recreateSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
+        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+        && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
+        )
+{
+    import core.lifetime : forward;
+    import expected : andThen;
+
+    from!"erupted".vkDeviceWaitIdle(arg.device);
+
+    return cleanupSwapChain(forward!arg)
+        .andThen!createSwapChainAndRelatedObjects
+        ;
+}
+
+auto ref createSwapChainAndRelatedObjects(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
+        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+        && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
+        )
+{
+    import core.lifetime : forward;
+    import expected : andThen;
+
+    return createSwapChain(forward!arg)
+        .andThen!getSwapChainImages
+        .andThen!createImageViews
+        .andThen!createRenderPass
+        .andThen!createGraphicsPipeline
+        .andThen!createFramebuffers
+        .andThen!createCommandPool
+        .andThen!createCommandBuffers
+        ;
 }
 
 auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
@@ -1567,6 +1600,54 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
     return ok(forward!arg);
 }
 
+auto ref cleanupSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.device) : from!"erupted".VkDevice)
+        && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
+        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+        && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
+        && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+        && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
+        && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+        && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
+    )
+{
+    import util : erase;
+    import core.lifetime : forward;
+    import std.meta : AliasSeq;
+    import expected : ok;
+
+    foreach(ref framebuffer; arg.swapChainFramebuffers[])
+    {
+        from!"erupted".vkDestroyFramebuffer(arg.device, framebuffer, null);
+    }
+
+    from!"erupted".vkFreeCommandBuffers(arg.device, arg.commandPool,
+        cast(uint) arg.commandBuffers.length, arg.commandBuffers.ptr);
+
+    from!"erupted".vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
+    from!"erupted".vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
+    from!"erupted".vkDestroyRenderPass(arg.device, arg.renderPass, null);
+
+    foreach(ref imageView; arg.swapChainImageViews[])
+    {
+        from!"erupted".vkDestroyImageView(arg.device, imageView, null);
+    }
+
+    from!"erupted".vkDestroySwapchainKHR(arg.device, arg.swapChain, null);
+
+    alias toErase = AliasSeq!(
+        "swapChain",
+        "swapChainImageViews",
+        "renderPass",
+        "pipelineLayout",
+        "graphicsPipeline",
+        "swapChainFramebuffers",
+        );
+    return ok(forward!arg.erase!toErase);
+}
+
 auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
     if(from!"std.typecons".isTuple!T
         && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
@@ -1582,83 +1663,67 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
         && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
         && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
         && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+        && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
         && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
         && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
-        )
+    )
 {
     import util : erase;
     import core.lifetime : forward;
     import std.meta : AliasSeq;
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
-    import expected : ok;
+    import expected : ok, andThen;
 
-    foreach(i; 0 .. MaxFramesInFlight)
-    {
-        from!"erupted".vkDestroyFence(arg.device, arg.inFlightFences[i], null);
-        from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphores[i], null);
-        from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
-    }
+    return cleanupSwapChain(forward!arg)
+        .andThen!((auto ref arg)
+        {
+            foreach(i; 0 .. MaxFramesInFlight)
+            {
+                from!"erupted".vkDestroyFence(arg.device, arg.inFlightFences[i], null);
+                from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphores[i], null);
+                from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
+            }
 
-    from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
+            from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
-    foreach(ref framebuffer; arg.swapChainFramebuffers[])
-    {
-        from!"erupted".vkDestroyFramebuffer(arg.device, framebuffer, null);
-    }
+            from!"erupted".vkDestroyDevice(arg.device, null);
 
-    from!"erupted".vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
-    from!"erupted".vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
-    from!"erupted".vkDestroyRenderPass(arg.device, arg.renderPass, null);
+            debug(LearnVulkan_ValidationLayers)
+            {
+                import erupted : vkDestroyDebugUtilsMessengerEXT;
+                vkDestroyDebugUtilsMessengerEXT(arg.instance, arg.debugMessenger, null);
+            }
 
-    foreach(ref imageView; arg.swapChainImageViews[])
-    {
-        from!"erupted".vkDestroyImageView(arg.device, imageView, null);
-    }
+            from!"erupted".vkDestroySurfaceKHR(arg.instance, arg.surface, null);
+            from!"erupted".vkDestroyInstance(arg.instance, null);
 
-    from!"erupted".vkDestroySwapchainKHR(arg.device, arg.swapChain, null);
-    from!"erupted".vkDestroyDevice(arg.device, null);
+            glfwDestroyWindow(arg.window);
+            glfwTerminate();
 
-    debug(LearnVulkan_ValidationLayers)
-    {
-        import erupted : vkDestroyDebugUtilsMessengerEXT;
-        vkDestroyDebugUtilsMessengerEXT(arg.instance, arg.debugMessenger, null);
-    }
+            freeVulkanLib();
 
-    from!"erupted".vkDestroySurfaceKHR(arg.instance, arg.surface, null);
-    from!"erupted".vkDestroyInstance(arg.instance, null);
+            static if(validationLayersEnabled)
+            {
+                alias validationLayersToErase = AliasSeq!("debugMessenger");
+            }
+            else
+            {
+                alias validationLayersToErase = AliasSeq!();
+            }
 
-    glfwDestroyWindow(arg.window);
-    glfwTerminate();
-
-    freeVulkanLib();
-
-    static if(validationLayersEnabled)
-    {
-        alias validationLayersErasedNames = AliasSeq!("debugMessenger");
-    }
-    else
-    {
-        alias validationLayersErasedNames = AliasSeq!();
-    }
-
-    alias erasedNames = AliasSeq!(
-        "window",
-        "instance",
-        "surface",
-        "device",
-        "swapChain",
-        "swapChainImageViews",
-        "renderPass",
-        "pipelineLayout",
-        "graphicsPipeline",
-        "swapChainFramebuffers",
-        "commandPool",
-        "imageAvailableSemaphores",
-        "renderFinishedSemaphores",
-        "inFlightFences",
-        validationLayersErasedNames,
-        );
-    return ok(forward!arg.erase!erasedNames);
+            alias toErase = AliasSeq!(
+                "window",
+                "instance",
+                "surface",
+                "device",
+                "commandPool",
+                "imageAvailableSemaphores",
+                "renderFinishedSemaphores",
+                "inFlightFences",
+                validationLayersToErase,
+                );
+            return ok(forward!arg.erase!toErase);
+        });
 }
