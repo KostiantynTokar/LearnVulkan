@@ -885,12 +885,29 @@ auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
         pColorAttachments : &colorAttachmentRef,
     };
 
+    const from!"erupted".VkSubpassDependency dependency =
+    {
+        srcSubpass : from!"erupted".VK_SUBPASS_EXTERNAL, // Refers to implicit subpass before and after render pass.
+        dstSubpass : 0, // This subpass's index.
+
+        // What operations to wait.
+        srcStageMask : from!"erupted".VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        srcAccessMask : 0,
+
+        // What operations are delayed.
+        dstStageMask : from!"erupted".VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        dstAccessMask : from!"erupted".VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    };
+
     const from!"erupted".VkRenderPassCreateInfo renderPassInfo =
     {
         attachmentCount : 1,
         pAttachments : &colorAttachment,
         subpassCount : 1,
         pSubpasses : &subpass,
+
+        dependencyCount : 1,
+        pDependencies : &dependency,
     };
 
     VkRenderPass renderPass;
