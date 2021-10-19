@@ -38,19 +38,34 @@ if(from!"std.typecons".isTuple!T)
     import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
-    import glfw_vulkan : glfwInit, glfwWindowHint, glfwCreateWindow, GLFWwindow,
+    import std.experimental.allocator.mallocator;
+    import glfw_vulkan : glfwInit, glfwWindowHint, glfwCreateWindow,
+            glfwSetWindowUserPointer, glfwSetFramebufferSizeCallback, GLFWwindow,
             GLFW_CLIENT_API, GLFW_NO_API, GLFW_RESIZABLE, GLFW_FALSE;
     import expected : ok;
+    import automem : RefCounted;
 
-    alias Res = TupleCat!(T, Tuple!(GLFWwindow*, "window"));
+    alias PtrType = RefCounted!(bool, Mallocator);
+    alias Res = TupleCat!(T, Tuple!(GLFWwindow*, "window", PtrType, "framebufferResized"));
     auto res = partialConstruct!Res(forward!arg);
+
+    res.framebufferResized = typeof(res.framebufferResized)(false);
 
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     res.window = glfwCreateWindow(StartWindowWidth, StartWindowHeight, "LearnVulkan", null, null);
+    glfwSetWindowUserPointer(res.window, res.framebufferResized);
+    glfwSetFramebufferSizeCallback(res.window, &framebufferResizeCallback);
     return ok(res.move);
+}
+
+extern(C) void framebufferResizeCallback(from!"glfw_vulkan".GLFWwindow* window, int width, int height) nothrow @nogc @trusted
+{
+    import glfw_vulkan : glfwGetWindowUserPointer;
+    auto framebufferResized = cast(bool*) glfwGetWindowUserPointer(window);
+    *framebufferResized = true;
 }
 
 auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
@@ -426,7 +441,6 @@ struct ChosenSwapChainSupport
     from!"erupted".VkSurfaceCapabilitiesKHR capabilities;
     from!"erupted".VkSurfaceFormatKHR surfaceFormat;
     from!"erupted".VkPresentModeKHR presentMode;
-    from!"erupted".VkExtent2D extent;
     uint imageCount;
 }
 
@@ -464,11 +478,17 @@ from!"erupted".VkPresentModeKHR chooseSwapPresentMode(VkPresentModeKHRArray)(
 
 from!"erupted".VkExtent2D chooseSwapExtent(
     from!"glfw_vulkan".GLFWwindow* window,
-    const ref from!"erupted".VkSurfaceCapabilitiesKHR capabilities
+    from!"erupted".VkPhysicalDevice device,
+    from!"erupted".VkSurfaceKHR surface,
+    in int framebufferWidth,
+    in int framebufferHeight,
     ) nothrow @nogc @trusted
 {
     import std.algorithm : clamp;
-    import glfw_vulkan : glfwGetFramebufferSize;
+    import erupted : vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+
+    from!"erupted".VkSurfaceCapabilitiesKHR capabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &capabilities);
 
     if(capabilities.currentExtent.width != uint.max)
     {
@@ -476,23 +496,19 @@ from!"erupted".VkExtent2D chooseSwapExtent(
         return capabilities.currentExtent;
     }
 
-    int width;
-    int height;
-    glfwGetFramebufferSize(window, &width, &height);
-
     from!"erupted".VkExtent2D actualExtent;
 
-    actualExtent.width = width
+    actualExtent.width = framebufferWidth
         .clamp(
             capabilities.minImageExtent.width,
             capabilities.maxImageExtent.width
             );
-    actualExtent.height = height
+    actualExtent.height = framebufferHeight
         .clamp(
             capabilities.minImageExtent.height,
             capabilities.maxImageExtent.height
             );
-    
+
     return actualExtent;
 }
 
@@ -585,11 +601,11 @@ if(from!"std.typecons".isTuple!T
         .map!((elem)
         {
             elem[1].physicalDevice = elem[0];
-            if(!checkDeviceExtensionSupport(elem[0]))
+            if(!checkDeviceExtensionSupport(elem[1].physicalDevice))
             {
                 return err!Res("Failed to find suitable GPU.");
             }
-            auto swapChainSupport = querySwapChainSupport(elem[0], elem[1].surface);
+            auto swapChainSupport = querySwapChainSupport(elem[1].physicalDevice, elem[1].surface);
             if(swapChainSupport.formats.empty || swapChainSupport.presentModes.empty)
             {
                 return err!Res("Failed to find suitable GPU.");
@@ -598,10 +614,9 @@ if(from!"std.typecons".isTuple!T
                 swapChainSupport.capabilities,
                 chooseSwapSurfaceFormat(swapChainSupport.formats),
                 chooseSwapPresentMode(swapChainSupport.presentModes),
-                chooseSwapExtent(elem[1].window, swapChainSupport.capabilities),
                 chooseImageCount(swapChainSupport.capabilities)
             );
-            immutable indices = findQueueFamilies(elem[0], elem[1].surface);
+            immutable indices = findQueueFamilies(elem[1].physicalDevice, elem[1].surface);
             return indices.match!(
                 (queueFamilyIndices)
                 {
@@ -760,6 +775,7 @@ if(from!"std.typecons".isTuple!T
     import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
+    import glfw_vulkan : glfwGetFramebufferSize, glfwWaitEvents;
     import erupted : VkSwapchainKHR, VkFormat, VkExtent2D;
     import expected : ok, err;
 
@@ -770,13 +786,23 @@ if(from!"std.typecons".isTuple!T
         ));
     auto res = partialConstruct!Res(forward!arg);
 
+    int width = 0;
+    int height = 0;
+    while(width == 0 || height == 0)
+    {
+        glfwGetFramebufferSize(res.window, &width, &height);
+        glfwWaitEvents();
+    }
+    
+    res.swapChainExtent = chooseSwapExtent(res.window, res.physicalDevice, res.surface, width, height);
+
     from!"erupted".VkSwapchainCreateInfoKHR createInfo =
     {
         surface : res.surface,
         minImageCount : res.chosenSwapChainSupport.imageCount,
         imageFormat : res.chosenSwapChainSupport.surfaceFormat.format,
         imageColorSpace : res.chosenSwapChainSupport.surfaceFormat.colorSpace,
-        imageExtent : res.chosenSwapChainSupport.extent,
+        imageExtent : res.swapChainExtent,
         // Always 1 unless for stereoscopic 3D application.
         imageArrayLayers : 1,
         // Render directly to imega. Use VK_IMAGE_USAGE_TRANSFER_DST_BIT for off-screen rendering.
@@ -810,8 +836,7 @@ if(from!"std.typecons".isTuple!T
         createInfo.pQueueFamilyIndices = null; // Optional
     }
 
-    res.swapChainImageFormat = createInfo.imageFormat;
-    res.swapChainExtent = createInfo.imageExtent;
+    res.swapChainImageFormat = createInfo.imageFormat; // TODO: is this variable necessary?
 
     return from!"erupted".vkCreateSwapchainKHR(res.device, &createInfo, null, &res.swapChain) == from!"erupted".VK_SUCCESS
         ? ok(res.move)
@@ -1529,8 +1554,9 @@ if(from!"std.typecons".isTuple!T
         &imageIndex,
         );
     
-    if(result == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR)
+    if(result == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR || *arg.framebufferResized)
     {
+        *arg.framebufferResized = false;
         return recreateSwapChain(forward!arg)
             .andThen!drawFrame(currentFrame)
             ;
@@ -1680,25 +1706,26 @@ if(from!"std.typecons".isTuple!T
 }
 
 auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
-        && is(typeof(arg.instance) : from!"erupted".VkInstance)
-        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
-        && from!"util".implies(validationLayersEnabled,
-            is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
-        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
-        && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
-        && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
-        && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
-        && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
-        && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
-        && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
-        && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
-    )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
+    && is(typeof(arg.framebufferResized))
+    && is(typeof(arg.instance) : from!"erupted".VkInstance)
+    && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
+    && from!"util".implies(validationLayersEnabled,
+        is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
+    && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+    && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
+    && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
+    && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
+    && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
+    && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
+    && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
+)
 {
     import util : erase;
     import core.lifetime : forward;
@@ -1746,6 +1773,7 @@ auto ref cleanup(T)(auto ref T arg) nothrow @nogc @trusted
 
             alias toErase = AliasSeq!(
                 "window",
+                "framebufferResized",
                 "instance",
                 "surface",
                 "device",
