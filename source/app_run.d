@@ -33,9 +33,9 @@ enum StartWindowHeight = 600;
 enum MaxFramesInFlight = 3;
 
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T)
+if(from!"std.typecons".isTuple!T)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import glfw_vulkan : glfwInit, glfwWindowHint, glfwCreateWindow, GLFWwindow,
@@ -43,17 +43,18 @@ auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
     import expected : ok;
 
     alias Res = TupleCat!(T, Tuple!(GLFWwindow*, "window"));
+    auto res = partialConstruct!Res(forward!arg);
 
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    auto window = glfwCreateWindow(StartWindowWidth, StartWindowHeight, "LearnVulkan", null, null);
-    return ok(Res(forward!arg.expand, window.move));
+    res.window = glfwCreateWindow(StartWindowWidth, StartWindowHeight, "LearnVulkan", null, null);
+    return ok(res.move);
 }
 
 auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T)
+if(from!"std.typecons".isTuple!T)
 {
     import core.lifetime : forward, move;
     import std.meta : AliasSeq;
@@ -71,14 +72,16 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
         .andThen!getDeviceQueues
         .andThen!createSwapChainAndRelatedObjects
+        .andThen!createCommandPool
+        .andThen!createCommandBuffers
         .andThen!createSyncObjects
         ;
 }
 
 auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T)
+if(from!"std.typecons".isTuple!T)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.meta : AliasSeq;
@@ -90,6 +93,7 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
     import expected : ok, err;
     
     alias Res = TupleCat!(T, Tuple!(VkInstance, "instance"));
+    auto res = partialConstruct!Res(forward!arg);
 
     const VkApplicationInfo appInfo =
     {
@@ -149,10 +153,8 @@ auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
         }
     }();
 
-    VkInstance instance;
-
-    return vkCreateInstance(&createInfo, null, &instance) == VK_SUCCESS
-        ? ok(Res(forward!arg.expand, instance.move))
+    return vkCreateInstance(&createInfo, null, &res.instance) == VK_SUCCESS
+        ? ok(res.move)
         : err!Res("Failed to create VkInstance.");
 }
 
@@ -233,24 +235,23 @@ debug(LearnVulkan_ValidationLayers)
     }
 
     auto ref setupDebugMessenger(T)(auto ref T arg) nothrow @nogc @trusted
-        if(from!"std.typecons".isTuple!T
-            && is(typeof(arg.instance) : from!"erupted".VkInstance)
-            )
+    if(from!"std.typecons".isTuple!T
+        && is(typeof(arg.instance) : from!"erupted".VkInstance)
+    )
     {
-        import util : TupleCat;
+        import util : TupleCat, partialConstruct;
         import core.lifetime : forward, move;
         import std.typecons : Tuple;
         import erupted : vkCreateDebugUtilsMessengerEXT, VkDebugUtilsMessengerEXT, VK_SUCCESS;
         import expected : ok, err;
         
         alias Res = TupleCat!(T, Tuple!(VkDebugUtilsMessengerEXT, "debugMessenger"));
+        auto res = partialConstruct!Res(forward!arg);
 
         const createInfo = defaultDebugMessengerCreateInfo();
 
-        VkDebugUtilsMessengerEXT debugMessenger;
-
-        return vkCreateDebugUtilsMessengerEXT(arg.instance, &createInfo, null, &debugMessenger) == VK_SUCCESS
-            ? ok(Res(forward!arg.expand, debugMessenger.move))
+        return vkCreateDebugUtilsMessengerEXT(res.instance, &createInfo, null, &res.debugMessenger) == VK_SUCCESS
+            ? ok(res.move)
             : err!Res("Failed to create debug messenger.");
     }
 
@@ -285,12 +286,12 @@ auto ref andThenSetupDebugMessenger(Exp)(auto ref Exp exp) nothrow @nogc @safe
 }
 
 auto ref createSurface(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
-        && is(typeof(arg.instance) : from!"erupted".VkInstance)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.window) : from!"bindbc.glfw".GLFWwindow*)
+    && is(typeof(arg.instance) : from!"erupted".VkInstance)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import glfw_vulkan : glfwCreateWindowSurface;
@@ -298,10 +299,10 @@ auto ref createSurface(T)(auto ref T arg) nothrow @nogc @trusted
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(VkSurfaceKHR, "surface"));
+    auto res = partialConstruct!Res(forward!arg);
 
-    VkSurfaceKHR surface;
-    return glfwCreateWindowSurface(arg.instance, arg.window, null, &surface) == VK_SUCCESS
-        ? ok(Res(forward!arg.expand, surface.move))
+    return glfwCreateWindowSurface(res.instance, res.window, null, &res.surface) == VK_SUCCESS
+        ? ok(res.move)
         : err!Res("Failed to create window surface.");
 }
 
@@ -545,12 +546,12 @@ bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow
 }
 
 auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.instance) : from!"erupted".VkInstance)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.instance) : from!"erupted".VkInstance)
+)
 {
-    import util : TupleCat;
-    import core.lifetime : forward;
+    import util : TupleCat, partialConstruct;
+    import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.range : zip, repeat, takeOne;
     import std.algorithm : map, fold;
@@ -565,9 +566,10 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
         QueueFamilyIndices, "queueFamilyIndices",
         ChosenSwapChainSupport, "chosenSwapChainSupport",
         ));
+    auto res = partialConstruct!Res(forward!arg);
     
     uint deviceCount;
-    vkEnumeratePhysicalDevices(arg.instance, &deviceCount, null);
+    vkEnumeratePhysicalDevices(res.instance, &deviceCount, null);
 
     if(deviceCount == 0)
     {
@@ -577,11 +579,12 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     auto devices = Mallocator.instance.makeArray!VkPhysicalDevice(deviceCount);
     scope(exit) () @trusted { Mallocator.instance.dispose(devices); }();
 
-    vkEnumeratePhysicalDevices(arg.instance, &deviceCount, devices.ptr);
+    vkEnumeratePhysicalDevices(res.instance, &deviceCount, devices.ptr);
 
-    return devices.zip(arg.repeat)
+    return devices.zip(res.repeat)
         .map!((elem)
         {
+            elem[1].physicalDevice = elem[0];
             if(!checkDeviceExtensionSupport(elem[0]))
             {
                 return err!Res("Failed to find suitable GPU.");
@@ -591,7 +594,7 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
             {
                 return err!Res("Failed to find suitable GPU.");
             }
-            immutable chosenSwapChainSupport = ChosenSwapChainSupport(
+            elem[1].chosenSwapChainSupport = ChosenSwapChainSupport(
                 swapChainSupport.capabilities,
                 chooseSwapSurfaceFormat(swapChainSupport.formats),
                 chooseSwapPresentMode(swapChainSupport.presentModes),
@@ -600,7 +603,11 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
             );
             immutable indices = findQueueFamilies(elem[0], elem[1].surface);
             return indices.match!(
-                queueFamilyIndices => ok(Res(elem[1].expand, elem[0], queueFamilyIndices, chosenSwapChainSupport)),
+                (queueFamilyIndices)
+                {
+                    elem[1].queueFamilyIndices = queueFamilyIndices;
+                    return ok(elem[1].move);
+                },
                 () => err!Res("Failed to find suitable GPU."));
         })
         .fold!((prev, exp) => prev.orElse!(e => e)(exp))
@@ -608,12 +615,12 @@ auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
 }
 
 auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
-        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
+    && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.algorithm : sort, uniq;
@@ -621,11 +628,12 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(VkDevice, "device"));
+    auto res = partialConstruct!Res(forward!arg);
 
-    enum queuesCount = arg.queueFamilyIndices.tupleof.length;
+    enum queuesCount = res.queueFamilyIndices.tupleof.length;
 
     from!"erupted".VkDeviceQueueCreateInfo[queuesCount] queueCreateInfos;
-    uint[queuesCount] queueFamilies = [arg.queueFamilyIndices.tupleof];
+    uint[queuesCount] queueFamilies = [res.queueFamilyIndices.tupleof];
     immutable queuePriority = 1.0f;
     uint uniqueFamiliesCount = 0;
     // TODO: sort requieres expected ModuleInfo? Breaks betterC.
@@ -661,42 +669,39 @@ auto ref createLogicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
         createInfo.enabledLayerCount = 0;
     }
 
-    VkDevice device;
-
-    return from!"erupted".vkCreateDevice(arg.physicalDevice, &createInfo, null, &device) == from!"erupted".VK_SUCCESS
-        ? ok(Res(forward!arg.expand, device.move))
+    return from!"erupted".vkCreateDevice(res.physicalDevice, &createInfo, null, &res.device) == from!"erupted".VK_SUCCESS
+        ? ok(res.move)
         : err!Res("Failed to create logical device.");
 }
 
 auto ref getDeviceQueues(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import erupted : VkQueue, vkGetDeviceQueue;
 
     alias Res = TupleCat!(T, Tuple!(VkQueue, "graphicsQueue", VkQueue, "presentQueue"));
+    auto res = partialConstruct!Res(forward!arg);
 
-    VkQueue graphicsQueue;
-    vkGetDeviceQueue(arg.device, arg.queueFamilyIndices.graphicsFamily, 0, &graphicsQueue);
+    vkGetDeviceQueue(res.device, res.queueFamilyIndices.graphicsFamily, 0, &res.graphicsQueue);
 
-    VkQueue presentQueue;
-    vkGetDeviceQueue(arg.device, arg.queueFamilyIndices.presentFamily, 0, &presentQueue);
+    vkGetDeviceQueue(res.device, res.queueFamilyIndices.presentFamily, 0, &res.presentQueue);
 
-    return from!"expected".ok(Res(forward!arg.expand, graphicsQueue.move, presentQueue.move));
+    return from!"expected".ok(res.move);
 }
 
 auto ref recreateSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
-        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
-        && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
+    && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+    && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
+)
 {
     import core.lifetime : forward;
     import expected : andThen;
@@ -705,16 +710,32 @@ auto ref recreateSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
 
     return cleanupSwapChain(forward!arg)
         .andThen!createSwapChainAndRelatedObjects
+        .andThen!recreateCommandBuffers
         ;
 }
 
+auto ref recreateCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
+    && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+    && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+)
+{
+    import util : erase;
+    import core.lifetime : forward;
+    return createCommandBuffers(forward!arg.erase!"commandBuffers");
+}
+
 auto ref createSwapChainAndRelatedObjects(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
-        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
-        && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
+    && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+    && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
+)
 {
     import core.lifetime : forward;
     import expected : andThen;
@@ -725,20 +746,18 @@ auto ref createSwapChainAndRelatedObjects(T)(auto ref T arg) nothrow @nogc @trus
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
         .andThen!createFramebuffers
-        .andThen!createCommandPool
-        .andThen!createCommandBuffers
         ;
 }
 
 auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
-        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
-        && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.surface) : from!"erupted".VkSurfaceKHR)
+    && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+    && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import erupted : VkSwapchainKHR, VkFormat, VkExtent2D;
@@ -749,34 +768,35 @@ auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
         VkFormat, "swapChainImageFormat",
         VkExtent2D, "swapChainExtent",
         ));
+    auto res = partialConstruct!Res(forward!arg);
 
     from!"erupted".VkSwapchainCreateInfoKHR createInfo =
     {
-        surface : arg.surface,
-        minImageCount : arg.chosenSwapChainSupport.imageCount,
-        imageFormat : arg.chosenSwapChainSupport.surfaceFormat.format,
-        imageColorSpace : arg.chosenSwapChainSupport.surfaceFormat.colorSpace,
-        imageExtent : arg.chosenSwapChainSupport.extent,
+        surface : res.surface,
+        minImageCount : res.chosenSwapChainSupport.imageCount,
+        imageFormat : res.chosenSwapChainSupport.surfaceFormat.format,
+        imageColorSpace : res.chosenSwapChainSupport.surfaceFormat.colorSpace,
+        imageExtent : res.chosenSwapChainSupport.extent,
         // Always 1 unless for stereoscopic 3D application.
         imageArrayLayers : 1,
         // Render directly to imega. Use VK_IMAGE_USAGE_TRANSFER_DST_BIT for off-screen rendering.
         imageUsage : from!"erupted".VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         // Do not want any transforms applied to swap chain images.
-        preTransform : arg.chosenSwapChainSupport.capabilities.currentTransform,
+        preTransform : res.chosenSwapChainSupport.capabilities.currentTransform,
         // Blending with other windows in the window system.
         compositeAlpha : from!"erupted".VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        presentMode : arg.chosenSwapChainSupport.presentMode,
+        presentMode : res.chosenSwapChainSupport.presentMode,
         // Do not render obscured pixels.
         clipped : from!"erupted".VK_TRUE,
         oldSwapchain : from!"erupted".VK_NULL_HANDLE,
     };
 
-    if(arg.queueFamilyIndices.graphicsFamily != arg.queueFamilyIndices.presentFamily)
+    if(res.queueFamilyIndices.graphicsFamily != res.queueFamilyIndices.presentFamily)
     {
         const uint[2] queueFamilyIndicesArr =
         [
-            arg.queueFamilyIndices.graphicsFamily,
-            arg.queueFamilyIndices.presentFamily,
+            res.queueFamilyIndices.graphicsFamily,
+            res.queueFamilyIndices.presentFamily,
         ];
         // Can be exclusive (more performant), but it requires explicit ownership control.
         createInfo.imageSharingMode = from!"erupted".VK_SHARING_MODE_CONCURRENT;
@@ -790,19 +810,21 @@ auto ref createSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
         createInfo.pQueueFamilyIndices = null; // Optional
     }
 
-    VkSwapchainKHR swapChain;
-    return from!"erupted".vkCreateSwapchainKHR(arg.device, &createInfo, null, &swapChain) == from!"erupted".VK_SUCCESS
-        ? ok(Res(forward!arg.expand, swapChain.move, createInfo.imageFormat.move, createInfo.imageExtent.move))
+    res.swapChainImageFormat = createInfo.imageFormat;
+    res.swapChainExtent = createInfo.imageExtent;
+
+    return from!"erupted".vkCreateSwapchainKHR(res.device, &createInfo, null, &res.swapChain) == from!"erupted".VK_SUCCESS
+        ? ok(res.move)
         : err!Res("Failed to create swap chain.");
 }
 
 auto ref getSwapChainImages(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.experimental.allocator.mallocator : Mallocator;
@@ -812,23 +834,23 @@ auto ref getSwapChainImages(T)(auto ref T arg) nothrow @nogc @trusted
     
     alias VectorType = Vector!(from!"erupted".VkImage, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainImages"));
+    auto res = partialConstruct!Res(forward!arg);
 
-    VectorType swapChainImages;
     uint imageCount;
-    vkGetSwapchainImagesKHR(arg.device, arg.swapChain, &imageCount, null);
-    swapChainImages.length = imageCount;
-    vkGetSwapchainImagesKHR(arg.device, arg.swapChain, &imageCount, swapChainImages.ptr);
-    return ok(Res(forward!arg.expand, swapChainImages.move));
+    vkGetSwapchainImagesKHR(res.device, res.swapChain, &imageCount, null);
+    res.swapChainImages.length = imageCount;
+    vkGetSwapchainImagesKHR(res.device, res.swapChain, &imageCount, res.swapChainImages.ptr);
+    return ok(res.move);
 }
 
 auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.range : enumerate;
@@ -838,17 +860,17 @@ auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
 
     alias VectorType = Vector!(from!"erupted".VkImageView, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainImageViews"));
+    auto res = partialConstruct!Res(forward!arg);
 
-    VectorType swapChainImageViews;
-    swapChainImageViews.length = arg.swapChainImages.length;
+    res.swapChainImageViews.length = res.swapChainImages.length;
 
-    foreach(i, ref image; arg.swapChainImages[].enumerate)
+    foreach(i, ref image; res.swapChainImages[].enumerate)
     {
         const from!"erupted".VkImageViewCreateInfo createInfo =
         {
             image : image,
             viewType : from!"erupted".VK_IMAGE_VIEW_TYPE_2D,
-            format : arg.swapChainImageFormat,
+            format : res.swapChainImageFormat,
 
             components : 
             {
@@ -869,27 +891,27 @@ auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
             },
         };
 
-        if(from!"erupted".vkCreateImageView(arg.device, &createInfo, null, &swapChainImageViews.ptr[i])
+        if(from!"erupted".vkCreateImageView(res.device, &createInfo, null, &res.swapChainImageViews.ptr[i])
             != from!"erupted".VK_SUCCESS)
         {
-            foreach(ref imageView; swapChainImageViews.ptr[0 .. i])
+            foreach(ref imageView; res.swapChainImageViews.ptr[0 .. i])
             {
-                from!"erupted".vkDestroyImageView(arg.device, imageView, null);
+                from!"erupted".vkDestroyImageView(res.device, imageView, null);
             }
             return err!Res("Failed to create image view.");
         }
     }
 
-    return ok(Res(forward!arg.expand, swapChainImageViews.move));
+    return ok(res.move);
 }
 
 auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import erupted : VkRenderPass, VK_SUCCESS;
@@ -898,10 +920,11 @@ auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
     alias Res = TupleCat!(T, Tuple!(
         VkRenderPass, "renderPass"
     ));
+    auto res = partialConstruct!Res(forward!arg);
 
     const from!"erupted".VkAttachmentDescription colorAttachment =
     {
-        format : arg.swapChainImageFormat,
+        format : res.swapChainImageFormat,
         samples : from!"erupted".VK_SAMPLE_COUNT_1_BIT,
         loadOp : from!"erupted".VK_ATTACHMENT_LOAD_OP_CLEAR,
         storeOp : from!"erupted".VK_ATTACHMENT_STORE_OP_STORE,
@@ -951,14 +974,13 @@ auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
         pDependencies : &dependency,
     };
 
-    VkRenderPass renderPass;
-    return from!"erupted".vkCreateRenderPass(arg.device, &renderPassInfo, null, &renderPass) == VK_SUCCESS
-        ? ok(Res(forward!arg.expand, renderPass.move))
+    return from!"erupted".vkCreateRenderPass(res.device, &renderPassInfo, null, &res.renderPass) == VK_SUCCESS
+        ? ok(res.move)
         : err!Res("Failed to create render pass.");
 }
 
 auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code) nothrow @nogc @trusted
-    in(cast(ptrdiff_t) code.ptr % 4 == 0)
+in(cast(ptrdiff_t) code.ptr % 4 == 0)
 {
     import core.lifetime : move;
     import expected : ok, err;
@@ -996,13 +1018,13 @@ auto ref createShaderModule(from!"erupted".VkDevice device, immutable(char)* com
 }
 
 auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
-        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import erupted : VkPipelineLayout, VkPipeline, vkDestroyShaderModule, VK_FALSE, VK_TRUE, VK_SUCCESS;
@@ -1013,11 +1035,12 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
             VkPipelineLayout, "pipelineLayout",
             VkPipeline, "graphicsPipeline",
         ));
+    auto res = partialConstruct!Res(forward!arg);
 
-    return createShaderModule(arg.device, "shaders_bin/vert.spv")
+    return createShaderModule(res.device, "shaders_bin/vert.spv")
         .andThen!((vertShaderModule) @trusted
         {
-            return createShaderModule(arg.device, "shaders_bin/frag.spv")
+            return createShaderModule(res.device, "shaders_bin/frag.spv")
                 .andThen!((fragShaderModule) @trusted
                 {
                     const from!"erupted".VkPipelineShaderStageCreateInfo[2] shaderStageInfos =
@@ -1056,8 +1079,8 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                     {
                         x : 0.0f,
                         y : 0.0f,
-                        width : arg.swapChainExtent.width,
-                        height : arg.swapChainExtent.height,
+                        width : res.swapChainExtent.width,
+                        height : res.swapChainExtent.height,
                         minDepth : 0.0f,
                         maxDepth : 1.0f,
                     };
@@ -1065,7 +1088,7 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                     const from!"erupted".VkRect2D scissor =
                     {
                         offset : {0, 0},
-                        extent : arg.swapChainExtent,
+                        extent : res.swapChainExtent,
                     };
 
                     const from!"erupted".VkPipelineViewportStateCreateInfo viewportState =
@@ -1157,9 +1180,8 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                         pPushConstantRanges : null, // Optional
                     };
 
-                    VkPipelineLayout pipelineLayout;
                     if(from!"erupted".vkCreatePipelineLayout(
-                        arg.device, &pipelineLayoutInfo, null, &pipelineLayout) != VK_SUCCESS)
+                        res.device, &pipelineLayoutInfo, null, &res.pipelineLayout) != VK_SUCCESS)
                     {
                         return err!Res("Failed to create pipeline layout.");
                     }
@@ -1176,8 +1198,8 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                         pDepthStencilState : null, // Optional
                         pColorBlendState : &colorBlending,
                         pDynamicState : null, // Optional
-                        layout : pipelineLayout,
-                        renderPass : arg.renderPass,
+                        layout : res.pipelineLayout,
+                        renderPass : res.renderPass,
                         subpass : 0, // Subpass index of this pipeline.
                         // Specify parent pipelint with common settings.
                         // VK_PIPELINE_CREATE_DERIVATIVE_BIT in flag should be set.
@@ -1185,23 +1207,22 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
                         basePipelineIndex: -1,
                     };
 
-                    VkPipeline graphicsPipeline;
-                    if(from!"erupted".vkCreateGraphicsPipelines(arg.device,
+                    if(from!"erupted".vkCreateGraphicsPipelines(res.device,
                         from!"erupted".VK_NULL_HANDLE, // VkPipelineCache of data relevant to pipeline creation.
                         1, &pipelineInfo, // Possible to create multiple pipelines at once.
-                        null, &graphicsPipeline) != VK_SUCCESS)
+                        null, &res.graphicsPipeline) != VK_SUCCESS)
                     {
                         return err!Res("Failed to create graphics pipeline.");
                     }
 
-                    vkDestroyShaderModule(arg.device, vertShaderModule, null);
-                    vkDestroyShaderModule(arg.device, fragShaderModule, null);
+                    vkDestroyShaderModule(res.device, vertShaderModule, null);
+                    vkDestroyShaderModule(res.device, fragShaderModule, null);
                     
-                    return ok(Res(forward!arg.expand, pipelineLayout.move, graphicsPipeline.move));
+                    return ok(res.move);
                 })
                 .orElse!((msg)
                 {
-                    vkDestroyShaderModule(arg.device, vertShaderModule, null);
+                    vkDestroyShaderModule(res.device, vertShaderModule, null);
                     return err!Res(msg);
                 })
                 ;
@@ -1209,14 +1230,14 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
 }
 
 auto ref createFramebuffers(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
-        && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.experimental.allocator.mallocator : Mallocator;
@@ -1227,11 +1248,11 @@ auto ref createFramebuffers(T)(auto ref T arg) nothrow @nogc @trusted
     
     alias VectorType = Vector!(from!"erupted".VkFramebuffer, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainFramebuffers"));
+    auto res = partialConstruct!Res(forward!arg);
 
-    VectorType swapChainFramebuffers;
-    swapChainFramebuffers.length = arg.swapChainImageViews.length;
+    res.swapChainFramebuffers.length = res.swapChainImageViews.length;
 
-    foreach (i, ref imageView; arg.swapChainImageViews[].enumerate)
+    foreach (i, ref imageView; res.swapChainImageViews[].enumerate)
     {
         const from!"erupted".VkImageView[1] attachments =
         [
@@ -1240,34 +1261,34 @@ auto ref createFramebuffers(T)(auto ref T arg) nothrow @nogc @trusted
 
         const from!"erupted".VkFramebufferCreateInfo framebufferInfo =
         {
-            renderPass : arg.renderPass,
+            renderPass : res.renderPass,
             attachmentCount : 1,
             pAttachments : attachments.ptr,
-            width : arg.swapChainExtent.width,
-            height : arg.swapChainExtent.height,
+            width : res.swapChainExtent.width,
+            height : res.swapChainExtent.height,
             layers : 1, // Number of layers in image arrays.
         };
 
-        if(vkCreateFramebuffer(arg.device, &framebufferInfo, null, &swapChainFramebuffers.ptr[i]) != VK_SUCCESS)
+        if(vkCreateFramebuffer(res.device, &framebufferInfo, null, &res.swapChainFramebuffers.ptr[i]) != VK_SUCCESS)
         {
-            foreach(ref framebuffer; swapChainFramebuffers.ptr[0 .. i])
+            foreach(ref framebuffer; res.swapChainFramebuffers.ptr[0 .. i])
             {
-                vkDestroyFramebuffer(arg.device, framebuffer, null);
+                vkDestroyFramebuffer(res.device, framebuffer, null);
             }
             return err!Res("Failed to create framebuffer.");
         }
     }
 
-    return ok(Res(forward!arg.expand, swapChainFramebuffers.move));
+    return ok(res.move);
 }
 
 auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import erupted : VkCommandPool, vkCreateCommandPool, VK_SUCCESS;
@@ -1276,10 +1297,11 @@ auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
     alias Res = TupleCat!(T, Tuple!(
         VkCommandPool, "commandPool",
     ));
+    auto res = partialConstruct!Res(forward!arg);
 
     const from!"erupted".VkCommandPoolCreateInfo poolInfo =
     {
-        queueFamilyIndex : arg.queueFamilyIndices.graphicsFamily,
+        queueFamilyIndex : res.queueFamilyIndices.graphicsFamily,
         flags : 0
             // Hint that command buffers are rerecorded with new commands very often.
             // | from!"erupted".VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
@@ -1288,23 +1310,22 @@ auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
             ,
     };
 
-    VkCommandPool commandPool;
-    return vkCreateCommandPool(arg.device, &poolInfo, null, &commandPool) == VK_SUCCESS
-        ? ok(Res(forward!arg.expand, commandPool.move))
+    return vkCreateCommandPool(res.device, &poolInfo, null, &res.commandPool) == VK_SUCCESS
+        ? ok(res.move)
         : err!Res("Failed to create command pool.");
 }
 
 auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
-        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
-        && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
-        && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
+    && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+    && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
     import std.experimental.allocator.mallocator : Mallocator;
@@ -1315,25 +1336,25 @@ auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
     
     alias VectorType = Vector!(from!"erupted".VkCommandBuffer, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "commandBuffers"));
+    auto res = partialConstruct!Res(forward!arg);
 
-    VectorType commandBuffers;
-    commandBuffers.length = arg.swapChainFramebuffers.length;
+    res.commandBuffers.length = res.swapChainFramebuffers.length;
 
     const from!"erupted".VkCommandBufferAllocateInfo allocInfo =
     {
-        commandPool : arg.commandPool,
+        commandPool : res.commandPool,
         // Primary - can be submitted to a queue, but cannot be called from other command buffers.
         // Secondary - cannot be submitted directly, but can be called from primary command buffers.
         level : from!"erupted".VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        commandBufferCount : cast(uint) commandBuffers.length,
+        commandBufferCount : cast(uint) res.commandBuffers.length,
     };
 
-    if(vkAllocateCommandBuffers(arg.device, &allocInfo, commandBuffers.ptr) != VK_SUCCESS)
+    if(vkAllocateCommandBuffers(res.device, &allocInfo, res.commandBuffers.ptr) != VK_SUCCESS)
     {
         return err!Res("Failed to allocate command buffers.");
     }
 
-    foreach(i, ref commandBuffer; commandBuffers[].enumerate)
+    foreach(i, ref commandBuffer; res.commandBuffers[].enumerate)
     {
         const from!"erupted".VkCommandBufferBeginInfo beginInfo =
         {
@@ -1363,12 +1384,12 @@ auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
         
         const from!"erupted".VkRenderPassBeginInfo renderPassInfo =
         {
-            renderPass : arg.renderPass,
-            framebuffer : arg.swapChainFramebuffers.ptr[i],
+            renderPass : res.renderPass,
+            framebuffer : res.swapChainFramebuffers.ptr[i],
             renderArea :
             {
                 offset : {0, 0},
-                extent : arg.swapChainExtent,
+                extent : res.swapChainExtent,
             },
             clearValueCount : 1,
             pClearValues : &clearColor,
@@ -1384,7 +1405,7 @@ auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
         from!"erupted".vkCmdBindPipeline(
             commandBuffer,
             from!"erupted".VK_PIPELINE_BIND_POINT_GRAPHICS,
-            arg.graphicsPipeline);
+            res.graphicsPipeline);
         
         from!"erupted".vkCmdDraw(
             commandBuffer,
@@ -1402,18 +1423,19 @@ auto ref createCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
         }
     }
 
-    return ok(Res(forward!arg.expand, commandBuffers.move));
+    return ok(res.move);
 }
 
 auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
-        )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+)
 {
-    import util : TupleCat;
+    import util : TupleCat, partialConstruct;
     import core.lifetime : forward, move;
     import std.typecons : Tuple;
+    import std.range : only;
     import std.experimental.allocator.mallocator : Mallocator;
     import erupted : VkSemaphore, VkFence, VK_SUCCESS;
     import automem : Vector;
@@ -1427,12 +1449,11 @@ auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
         VkFence[MaxFramesInFlight], "inFlightFences",
         VectorType, "imagesInFlight",
     ));
+    auto res = partialConstruct!Res(forward!arg);
 
-    VectorType imagesInFlight;
-    imagesInFlight.length = arg.swapChainImages.length;
+    res.imagesInFlight.length = res.swapChainImages.length;
 
-    VkSemaphore[MaxFramesInFlight][2] semaphores;
-    VkFence[MaxFramesInFlight] inFlightFences;
+    VkSemaphore[MaxFramesInFlight]*[2] semaphores = [ &res.imageAvailableSemaphores, &res.renderFinishedSemaphores ];
 
     void destroyCreatedObjects(immutable size_t i, immutable size_t j)
     {
@@ -1440,13 +1461,13 @@ auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
         {
             foreach(l; 0 .. semaphores.length)
             {
-                from!"erupted".vkDestroySemaphore(arg.device, semaphores[l][k], null);
+                from!"erupted".vkDestroySemaphore(res.device, (*semaphores[l])[k], null);
             }
-            from!"erupted".vkDestroyFence(arg.device, inFlightFences[k], null);
+            from!"erupted".vkDestroyFence(res.device, res.inFlightFences[k], null);
         }
         foreach(l; 0 .. j)
         {
-            from!"erupted".vkDestroySemaphore(arg.device, semaphores[l][i], null);
+            from!"erupted".vkDestroySemaphore(res.device, (*semaphores[l])[i], null);
         }
     }
 
@@ -1455,7 +1476,7 @@ auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
         foreach(j; 0 .. semaphores.length)
         {
             const from!"erupted".VkSemaphoreCreateInfo semaphoreInfo;
-            if(from!"erupted".vkCreateSemaphore(arg.device, &semaphoreInfo, null, &semaphores[j][i]) != VK_SUCCESS)
+            if(from!"erupted".vkCreateSemaphore(res.device, &semaphoreInfo, null, &(*semaphores[j])[i]) != VK_SUCCESS)
             {
                 destroyCreatedObjects(i, j);
                 return err!Res("Failed to create semaphore.");
@@ -1466,36 +1487,32 @@ auto ref createSyncObjects(T)(auto ref T arg) nothrow @nogc @trusted
         {
             flags : from!"erupted".VK_FENCE_CREATE_SIGNALED_BIT,
         };
-        if(from!"erupted".vkCreateFence(arg.device, &fenceInfo, null, &inFlightFences[i]) != VK_SUCCESS)
+        if(from!"erupted".vkCreateFence(res.device, &fenceInfo, null, &res.inFlightFences[i]) != VK_SUCCESS)
         {
             destroyCreatedObjects(i, semaphores.length);
             return err!Res("Failed to create fence.");
         }
     }
 
-    return ok(Res(
-        forward!arg.expand,
-        semaphores[0].move, semaphores[1].move,
-        inFlightFences.move, imagesInFlight.move
-        ));
+    return ok(res.move);
 }
 
-auto drawFrame(T)(auto ref T arg, immutable size_t currentFrame) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
-        && is(typeof(arg.presentQueue) : from!"erupted".VkQueue)
-        && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
-        && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
-        && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
-        && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
-        && is(from!"std.range".ElementType!(typeof(arg.imagesInFlight[])) : from!"erupted".VkFence)
-        && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
-    )
+from!"expected".Expected!T drawFrame(T)(auto ref T arg, immutable size_t currentFrame) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
+    && is(typeof(arg.presentQueue) : from!"erupted".VkQueue)
+    && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
+    && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
+    && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
+    && is(from!"std.range".ElementType!(typeof(arg.inFlightFences[])) : from!"erupted".VkFence)
+    && is(from!"std.range".ElementType!(typeof(arg.imagesInFlight[])) : from!"erupted".VkFence)
+    && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
+)
 {
     import core.lifetime : forward;
     import erupted : vkQueueSubmit, VK_NULL_HANDLE, VK_SUCCESS, VK_TRUE;
-    import expected : ok, err;
+    import expected : ok, err, andThen;
 
     from!"erupted".vkWaitForFences(arg.device, 1, &arg.inFlightFences[currentFrame],
         VK_TRUE, // Whether to wait all fences in the array or any of the fences.
@@ -1503,7 +1520,7 @@ auto drawFrame(T)(auto ref T arg, immutable size_t currentFrame) nothrow @nogc @
         );
     
     uint imageIndex;
-    from!"erupted".vkAcquireNextImageKHR(
+    immutable result = from!"erupted".vkAcquireNextImageKHR(
         arg.device,
         arg.swapChain,
         ulong.max, // Timeout in nanoseconds. 64 unsigned max disables timeout.
@@ -1511,6 +1528,17 @@ auto drawFrame(T)(auto ref T arg, immutable size_t currentFrame) nothrow @nogc @
         VK_NULL_HANDLE, // Fence.
         &imageIndex,
         );
+    
+    if(result == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        return recreateSwapChain(forward!arg)
+            .andThen!drawFrame(currentFrame)
+            ;
+    }
+    else if(result != VK_SUCCESS && result != from!"erupted".VK_SUBOPTIMAL_KHR)
+    {
+        return err!T("Failed to acquire swap chain image.");
+    }
     
     if(arg.imagesInFlight.ptr[imageIndex] != VK_NULL_HANDLE)
     {
@@ -1596,22 +1624,22 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         currentFrame = (currentFrame + 1) % MaxFramesInFlight;
     }
 
-    from!"erupted".vkDeviceWaitIdle(arg.device);
+    from!"erupted".vkDeviceWaitIdle(exp.value.device);
     return exp;
 }
 
 auto ref cleanupSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
-    if(from!"std.typecons".isTuple!T
-        && is(typeof(arg.device) : from!"erupted".VkDevice)
-        && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
-        && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
-        && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
-        && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
-        && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
-        && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
-        && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
-    )
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
+    && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+    && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
+    && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
+    && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
+)
 {
     import util : erase;
     import core.lifetime : forward;
@@ -1638,7 +1666,10 @@ auto ref cleanupSwapChain(T)(auto ref T arg) nothrow @nogc @trusted
     from!"erupted".vkDestroySwapchainKHR(arg.device, arg.swapChain, null);
 
     alias toErase = AliasSeq!(
+        "swapChainImageFormat",
+        "swapChainExtent",
         "swapChain",
+        "swapChainImages",
         "swapChainImageViews",
         "renderPass",
         "pipelineLayout",

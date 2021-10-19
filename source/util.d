@@ -31,7 +31,7 @@ struct StaticAlignedMallocator(uint alignment_)
 }
 
 template TupleCat(Ts...)
-    if(from!"std.meta".allSatisfy!(from!"std.typecons".isTuple, Ts))
+if(from!"std.meta".allSatisfy!(from!"std.typecons".isTuple, Ts))
 {
     import std.meta : AliasSeq;
     import std.typecons : Tuple;
@@ -42,7 +42,7 @@ template TupleCat(Ts...)
         {
             static if(T.fieldNames[i] == "")
             {
-                A = AliasSeq!(A, T.Types[i]);
+                static assert(false, "Empty field names are not supported.");
             }
             else
             {
@@ -50,7 +50,37 @@ template TupleCat(Ts...)
             }
         }
     }
-    alias TupleCat = Tuple!A;
+    auto genSortedIndices()
+    {
+        import std.algorithm : makeIndex;
+        string[] fieldNames;
+        static foreach(T; Ts)
+        {
+            static foreach(i; 0 .. T.Types.length)
+            {
+                fieldNames ~= T.fieldNames[i];
+            }
+        }
+        auto indices = new size_t[fieldNames.length];
+        fieldNames.makeIndex(indices);
+        return indices;
+    }
+    alias B = AliasSeq!();
+    static foreach(i; genSortedIndices())
+    {
+        B = AliasSeq!(B, A[2 * i], A[2 * i + 1]);
+    }
+    alias TupleCat = Tuple!B;
+}
+
+ToTuple partialConstruct(ToTuple, FromTuple)(auto ref FromTuple arg)
+{
+    ToTuple res;
+    static foreach(name; FromTuple.fieldNames)
+    {
+        __traits(getMember, res, name) = forwardMember!(arg, name);
+    }
+    return res;
 }
 
 template TupleErase(T, memberNames...)
@@ -60,7 +90,7 @@ template TupleErase(T, memberNames...)
 }
 
 template erase(memberNames...)
-    if(from!"std.meta".allSatisfy!(from!"std.traits".isSomeString, typeof(memberNames)))
+if(from!"std.meta".allSatisfy!(from!"std.traits".isSomeString, typeof(memberNames)))
 {
     import core.lifetime : forward;
 
@@ -107,7 +137,7 @@ int strcmp(in string str, in char* cStr) pure nothrow @nogc @trusted
 }
 
 private template calcRemaining(T, memberNames...)
-    if(from!"std.typecons".isTuple!T)
+if(from!"std.typecons".isTuple!T)
 {
     bool[T.Types.length] calcRemaining()
     {
@@ -149,4 +179,76 @@ private template TupleEraseImpl(T, alias remaining)
         }
     }
     alias TupleEraseImpl = Tuple!A;
+}
+
+template forwardMember(alias arg, string member)
+{
+    import core.lifetime : move;
+    // lvalue arg or non-moveable member (rvalue or const/immutable)
+    static if (__traits(isRef,  arg) ||
+               __traits(isOut,  arg) ||
+               __traits(isLazy, arg) ||
+               !is(typeof(move(__traits(getMember, arg, member)))))
+        @property auto ref forwardMember(){ return __traits(getMember, arg, member); }
+    // rvalue arg and moveable member (mutable lvalue)
+    else
+        @property auto forwardMember(){ return move(__traits(getMember, arg, member)); }
+}
+
+@("forwardMember")
+@safe unittest
+{
+    struct A
+    {
+        int i;
+        ~this() {}
+    }
+    struct S
+    {
+        A a;
+        A rvalue() { return a; }
+        ref A lvalue() { return a; }
+    }
+
+    bool foo(T)(auto ref T val)
+    {
+        return __traits(isRef, val);
+    }
+    bool bar(string member, T)(auto ref T val, out int after)
+    {
+        auto res = foo(forwardMember!(val, member));
+        after = val.a.i;
+        return res;
+    }
+
+    int after;
+
+    // rvalue arg, member -> foo gets rvalue by move
+    assert(bar!"a"(S(A(1729)), after) == false);
+    assert(after == 0);
+
+    // rvalue arg, rvalue method -> foo gets rvalue as return value of `rvalue` method, no moves
+    assert(bar!"rvalue"(S(A(1729)), after) == false);
+    assert(after == 1729);
+
+    // rvalue arg, lvalue method -> foo gets rvalue by move
+    assert(bar!"lvalue"(S(A(1729)), after) == false);
+    assert(after == 0);
+
+    auto s = S(A(42));
+
+    // lvalue arg, member -> foo gets lvalue
+    assert(bar!"a"(s, after) == true);
+    assert(after == 42);
+    assert(s.a.i == 42);
+
+    // lvalue arg, rvalue method -> foo gets rvalue as return value of `rvalue` method, no moves
+    assert(bar!"rvalue"(s, after) == false);
+    assert(after == 42);
+    assert(s.a.i == 42);
+
+    // lvalue arg, lvalue method -> foo gets lvalue
+    assert(bar!"lvalue"(s, after) == true);
+    assert(after == 42);
+    assert(s.a.i == 42);
 }
