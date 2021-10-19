@@ -438,7 +438,6 @@ SwapChainSupportDetails querySwapChainSupport(
 
 struct ChosenSwapChainSupport
 {
-    from!"erupted".VkSurfaceCapabilitiesKHR capabilities;
     from!"erupted".VkSurfaceFormatKHR surfaceFormat;
     from!"erupted".VkPresentModeKHR presentMode;
     uint imageCount;
@@ -476,12 +475,15 @@ from!"erupted".VkPresentModeKHR chooseSwapPresentMode(VkPresentModeKHRArray)(
     return from!"erupted".VK_PRESENT_MODE_FIFO_KHR;
 }
 
-from!"erupted".VkExtent2D chooseSwapExtent(
-    from!"glfw_vulkan".GLFWwindow* window,
-    from!"erupted".VkPhysicalDevice device,
-    from!"erupted".VkSurfaceKHR surface,
-    in int framebufferWidth,
-    in int framebufferHeight,
+from!"std.typecons".Tuple!(
+    from!"erupted".VkExtent2D, "extent",
+    from!"erupted".VkSurfaceCapabilitiesKHR, "capabilities")
+    chooseSwapExtent(
+        from!"glfw_vulkan".GLFWwindow* window,
+        from!"erupted".VkPhysicalDevice device,
+        from!"erupted".VkSurfaceKHR surface,
+        in int framebufferWidth,
+        in int framebufferHeight
     ) nothrow @nogc @trusted
 {
     import std.algorithm : clamp;
@@ -493,7 +495,7 @@ from!"erupted".VkExtent2D chooseSwapExtent(
     if(capabilities.currentExtent.width != uint.max)
     {
         // Window manager allows non-fixed extent.
-        return capabilities.currentExtent;
+        return typeof(return)(capabilities.currentExtent, capabilities);
     }
 
     from!"erupted".VkExtent2D actualExtent;
@@ -509,7 +511,7 @@ from!"erupted".VkExtent2D chooseSwapExtent(
             capabilities.maxImageExtent.height
             );
 
-    return actualExtent;
+    return typeof(return)(actualExtent, capabilities);
 }
 
 uint chooseImageCount(
@@ -611,7 +613,6 @@ if(from!"std.typecons".isTuple!T
                 return err!Res("Failed to find suitable GPU.");
             }
             elem[1].chosenSwapChainSupport = ChosenSwapChainSupport(
-                swapChainSupport.capabilities,
                 chooseSwapSurfaceFormat(swapChainSupport.formats),
                 chooseSwapPresentMode(swapChainSupport.presentModes),
                 chooseImageCount(swapChainSupport.capabilities)
@@ -794,7 +795,8 @@ if(from!"std.typecons".isTuple!T
         glfwWaitEvents();
     }
     
-    res.swapChainExtent = chooseSwapExtent(res.window, res.physicalDevice, res.surface, width, height);
+    immutable extentAndCapabilites = chooseSwapExtent(res.window, res.physicalDevice, res.surface, width, height);
+    res.swapChainExtent = extentAndCapabilites.extent;
 
     from!"erupted".VkSwapchainCreateInfoKHR createInfo =
     {
@@ -808,7 +810,7 @@ if(from!"std.typecons".isTuple!T
         // Render directly to imega. Use VK_IMAGE_USAGE_TRANSFER_DST_BIT for off-screen rendering.
         imageUsage : from!"erupted".VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         // Do not want any transforms applied to swap chain images.
-        preTransform : res.chosenSwapChainSupport.capabilities.currentTransform,
+        preTransform : extentAndCapabilites.capabilities.currentTransform,
         // Blending with other windows in the window system.
         compositeAlpha : from!"erupted".VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         presentMode : res.chosenSwapChainSupport.presentMode,
@@ -836,7 +838,7 @@ if(from!"std.typecons".isTuple!T
         createInfo.pQueueFamilyIndices = null; // Optional
     }
 
-    res.swapChainImageFormat = createInfo.imageFormat; // TODO: is this variable necessary?
+    res.swapChainImageFormat = createInfo.imageFormat;
 
     return from!"erupted".vkCreateSwapchainKHR(res.device, &createInfo, null, &res.swapChain) == from!"erupted".VK_SUCCESS
         ? ok(res.move)
