@@ -26,7 +26,8 @@
 			],
 			"group": "build",
 			"label": "dub: Build debug learn-vulkan",
-			"detail": "dub build --compiler=ldc2 -a=x86_64 -b=debug-app -c=application"
+			"detail": "dub build --compiler=ldc2 -a=x86_64 -b=debug-app -c=application",
+			"dependsOn": ["Compile shaders"]
 		},
 		{
 			"type": "dub",
@@ -56,7 +57,8 @@
 			],
 			"group": "build",
 			"label": "dub: Build release learn-vulkan",
-			"detail": "dub build --compiler=ldc2 -a=x86_64 -b=release-app -c=application"
+			"detail": "dub build --compiler=ldc2 -a=x86_64 -b=release-app -c=application",
+			"dependsOn": ["Compile shaders"]
 		},
 		{
 			"type": "dub",
@@ -86,7 +88,8 @@
 			],
 			"group": "build",
 			"label": "dub: Run debug learn-vulkan",
-			"detail": "dub run --compiler=ldc2 -a=x86_64 -b=debug-app -c=application"
+			"detail": "dub run --compiler=ldc2 -a=x86_64 -b=debug-app -c=application",
+			"dependsOn": ["Compile shaders"]
 		},
 		{
 			"type": "dub",
@@ -116,7 +119,8 @@
 			],
 			"group": "build",
 			"label": "dub: Run release learn-vulkan",
-			"detail": "dub run --compiler=ldc2 -a=x86_64 -b=release-app -c=application"
+			"detail": "dub run --compiler=ldc2 -a=x86_64 -b=release-app -c=application",
+			"dependsOn": ["Compile shaders"]
 		},
 		{
 			"type": "dub",
