@@ -142,6 +142,7 @@ if(from!"std.typecons".isTuple!T)
         .andThen!getDeviceQueues
         .andThen!createSwapChainAndRelatedObjects
         .andThen!createCommandPool
+        .andThen!createVertexBuffer
         .andThen!createCommandBuffers
         .andThen!createSyncObjects
         ;
@@ -1366,6 +1367,37 @@ if(from!"std.typecons".isTuple!T
     return ok(res.move);
 }
 
+auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util : TupleCat, partialConstruct;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        from!"erupted".VkBuffer, "vertexBuffer",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const from!"erupted".VkBufferCreateInfo bufferInfo =
+    {
+        size : vertices.sizeof,
+        // Possible to specify multiple purposes using a bitwase or.
+        usage : from!"erupted".VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        // Sharing between queue families.
+        sharingMode : from!"erupted".VK_SHARING_MODE_EXCLUSIVE,
+        // Configure sparse buffer memory.
+        flags : 0,
+    };
+
+    return from!"erupted".vkCreateBuffer(res.device, &bufferInfo, null, &res.vertexBuffer) == from!"erupted".VK_SUCCESS
+        ? ok(res.move)
+        : err!Res("Failed to create vertex buffer.");
+}
+
 auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -1780,6 +1812,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
     && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
@@ -1802,6 +1835,8 @@ if(from!"std.typecons".isTuple!T
                 from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphores[i], null);
                 from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
             }
+
+            from!"erupted".vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
 
             from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
@@ -1837,6 +1872,7 @@ if(from!"std.typecons".isTuple!T
                 "surface",
                 "device",
                 "commandPool",
+                "vertexBuffer",
                 "imageAvailableSemaphores",
                 "renderFinishedSemaphores",
                 "inFlightFences",
