@@ -32,6 +32,60 @@ enum StartWindowHeight = 600;
 
 enum MaxFramesInFlight = 3;
 
+struct Vertex
+{
+    from!"gfm.math".vec2f pos;
+    from!"gfm.math".vec3f color;
+
+    static from!"erupted".VkVertexInputBindingDescription getBindingDescription() nothrow @nogc @trusted
+    {
+        const from!"erupted".VkVertexInputBindingDescription bindingDescription =
+        {
+            // Index of the binding in the array of bindings of VkPipelineVertexInputStateCreateInfo.
+            binding : 0,
+            // Number of bytes from one entry to next.
+            stride : Vertex.sizeof,
+            // VERTEX or INSTANCE: move to next entry after each vertex/instance.
+            inputRate : from!"erupted".VK_VERTEX_INPUT_RATE_VERTEX,
+        };
+        return bindingDescription;
+    }
+
+    static from!"erupted".VkVertexInputAttributeDescription[2] getAttributeDescriptions() nothrow @nogc @trusted
+    {
+        const from!"erupted".VkVertexInputAttributeDescription[2] attributeDescriptions =
+        [
+            {
+                // From which binding data comes.
+                binding : 0,
+                // Input location in the vertex shader.
+                location : 0,
+                // Formats: R32[G32[B32[A32]]]_<SFLOAT|SINT|UINT> etc.
+                format : from!"erupted".VK_FORMAT_R32G32_SFLOAT,
+                offset : Vertex.pos.offsetof,
+            },
+            {
+                binding : 0,
+                location : 1,
+                format : from!"erupted".VK_FORMAT_R32G32B32_SFLOAT,
+                offset : Vertex.color.offsetof,
+            },
+        ];
+        return attributeDescriptions;
+    }
+}
+
+immutable Vertex[3] vertices = ()
+{
+    import gfm.math : vec2f, vec3f;
+    immutable Vertex[3] vertices = [
+        { vec2f( 0.0f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
+        { vec2f( 0.0f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
+        { vec2f( 0.0f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
+    ];
+    return vertices;
+}();
+
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T)
 {
@@ -1086,14 +1140,17 @@ if(from!"std.typecons".isTuple!T
                         },
                     ];
 
-                    const from!"erupted".VkPipelineVertexInputStateCreateInfo vertexInput =
+                    const bindingDescription = Vertex.getBindingDescription();
+                    const attributeDescriptions = Vertex.getAttributeDescriptions();
+
+                    const from!"erupted".VkPipelineVertexInputStateCreateInfo vertexInputInfo =
                     {
                         // Data is per-vertex or per-instance?
-                        vertexBindingDescriptionCount : 0,
-                        pVertexBindingDescriptions : null,
+                        vertexBindingDescriptionCount : 1,
+                        pVertexBindingDescriptions : &bindingDescription,
                         // Binding and offset of attributes.
-                        vertexAttributeDescriptionCount : 0,
-                        pVertexAttributeDescriptions : null,
+                        vertexAttributeDescriptionCount : attributeDescriptions.length,
+                        pVertexAttributeDescriptions : attributeDescriptions.ptr,
                     };
 
                     const from!"erupted".VkPipelineInputAssemblyStateCreateInfo inputAssembly =
@@ -1217,7 +1274,7 @@ if(from!"std.typecons".isTuple!T
                     {
                         stageCount : shaderStageInfos.length,
                         pStages : shaderStageInfos.ptr,
-                        pVertexInputState : &vertexInput,
+                        pVertexInputState : &vertexInputInfo,
                         pInputAssemblyState : &inputAssembly,
                         pViewportState : &viewportState,
                         pRasterizationState : &rasterizer,
