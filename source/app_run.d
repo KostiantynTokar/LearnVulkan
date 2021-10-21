@@ -1402,7 +1402,12 @@ if(from!"std.typecons".isTuple!T
     return err!Res("Falied to find suitable memory type.");
 }
 
-auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
+auto createBuffer(string bufferName, string deviceMemoryName, T)(
+    auto ref T arg,
+    from!"erupted".VkDeviceSize size,
+    from!"erupted".VkBufferUsageFlags usage,
+    from!"erupted".VkMemoryPropertyFlags properties,
+) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
 )
@@ -1417,23 +1422,23 @@ if(from!"std.typecons".isTuple!T
     return (auto ref arg)
     {
         alias Res = TupleCat!(T, Tuple!(
-            from!"erupted".VkBuffer, "vertexBuffer",
+            from!"erupted".VkBuffer, bufferName,
             from!"erupted".VkMemoryRequirements, "memRequirements",
         ));
         auto res = partialConstruct!Res(forward!arg);
 
         const from!"erupted".VkBufferCreateInfo bufferInfo =
         {
-            size : vertices.sizeof,
+            size : size,
             // Possible to specify multiple purposes using a bitwase or.
-            usage : from!"erupted".VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            usage : usage,
             // Sharing between queue families.
             sharingMode : from!"erupted".VK_SHARING_MODE_EXCLUSIVE,
             // Configure sparse buffer memory.
             flags : 0,
         };
 
-        if(from!"erupted".vkCreateBuffer(res.device, &bufferInfo, null, &res.vertexBuffer) != VK_SUCCESS)
+        if(from!"erupted".vkCreateBuffer(res.device, &bufferInfo, null, &__traits(getMember, res, bufferName)) != VK_SUCCESS)
         {
             return err!Res("Failed to create vertex buffer.");
         }
@@ -1442,47 +1447,72 @@ if(from!"std.typecons".isTuple!T
 
         return ok(res.move);
     }(forward!arg)
-    .andThen!findMemoryType(
-        from!"erupted".VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
-        from!"erupted".VK_MEMORY_PROPERTY_HOST_COHERENT_BIT // Data can be immediatly written to the memory by host.
-    )
+    .andThen!findMemoryType(properties)
     .andThen!((auto ref arg)
     {
         import core.stdc.string : memcpy;
         
         alias TempRes = TupleCat!(typeof(arg), Tuple!(
-            from!"erupted".VkDeviceMemory, "vertexBufferMemory",
+            from!"erupted".VkDeviceMemory, deviceMemoryName,
         ));
-        alias toErase = AliasSeq!("memRequirements", "chosenMemoryType");
+        alias toErase = AliasSeq!("memRequirements", "chosenMemoryTypeIndex");
         alias Res = TupleErase!(TempRes, toErase);
         auto res = partialConstruct!TempRes(forward!arg);
 
-        from!"erupted".VkMemoryAllocateInfo allocInfo =
+        const from!"erupted".VkMemoryAllocateInfo allocInfo =
         {
             allocationSize : res.memRequirements.size,
             memoryTypeIndex : res.chosenMemoryTypeIndex,
         };
 
-        if(from!"erupted".vkAllocateMemory(res.device, &allocInfo, null, &res.vertexBufferMemory) != VK_SUCCESS)
+        if(from!"erupted".vkAllocateMemory(
+            res.device, &allocInfo, null, &__traits(getMember, res, deviceMemoryName)) != VK_SUCCESS)
         {
-            return err!Res("Failed to allocate vertex buffer memory.");
+            return err!Res("Failed to allocate buffer memory.");
         }
 
         // Device, vertex buffer, device memory and offset within the device memory.
-        from!"erupted".vkBindBufferMemory(res.device, res.vertexBuffer, res.vertexBufferMemory, 0);
+        from!"erupted".vkBindBufferMemory(res.device, __traits(getMember, res, bufferName), res.vertexBufferMemory, 0);
+        
+        return ok(res.move.erase!toErase);
+    })
+    ;
+}
+
+auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util : TupleCat, partialConstruct, TupleErase, erase;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import std.meta : AliasSeq;
+    import erupted : VK_SUCCESS;
+    import expected : ok, err, andThen;
+
+    return forward!arg.createBuffer!("vertexBuffer", "vertexBufferMemory")(
+        vertices.sizeof,
+        // Possible to specify multiple purposes using a bitwase or.
+        from!"erupted".VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        from!"erupted".VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
+        from!"erupted".VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // Data can be immediatly written to the memory by host.
+    )
+    .andThen!((auto ref arg)
+    {
+        import core.stdc.string : memcpy;
 
         void* data;
-        from!"erupted".vkMapMemory(res.device, res.vertexBufferMemory,
+        from!"erupted".vkMapMemory(arg.device, arg.vertexBufferMemory,
             0, // Offset.
             vertices.sizeof, // Size (or VK_WHOLE_SIZE).
             0, // Flags, not used in current API.
             &data
         );
         memcpy(data, vertices.ptr, vertices.sizeof);
-        auto tmp = cast(void*)vertices.ptr;
-        from!"erupted".vkUnmapMemory(res.device, res.vertexBufferMemory);
+        from!"erupted".vkUnmapMemory(arg.device, arg.vertexBufferMemory);
         
-        return ok(res.move.erase!toErase);
+        return ok(forward!arg);
     })
     ;
 }
