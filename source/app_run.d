@@ -1367,9 +1367,13 @@ if(from!"std.typecons".isTuple!T
     return ok(res.move);
 }
 
-auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
+auto findMemoryType(T)(
+    auto ref T arg,
+    in from!"erupted".VkMemoryPropertyFlags properties
+    ) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
-    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
+    && is(typeof(arg.memRequirements) : from!"erupted".VkMemoryRequirements)
 )
 {
     import util : TupleCat, partialConstruct;
@@ -1377,25 +1381,109 @@ if(from!"std.typecons".isTuple!T
     import std.typecons : Tuple;
     import expected : ok, err;
 
-    alias Res = TupleCat!(T, Tuple!(
-        from!"erupted".VkBuffer, "vertexBuffer",
-    ));
+    alias Res = TupleCat!(T, Tuple!(uint, "chosenMemoryTypeIndex"));
     auto res = partialConstruct!Res(forward!arg);
+    
+    from!"erupted".VkPhysicalDeviceMemoryProperties memProperties;
+    from!"erupted".vkGetPhysicalDeviceMemoryProperties(res.physicalDevice, &memProperties);
 
-    const from!"erupted".VkBufferCreateInfo bufferInfo =
+    foreach(i; 0 .. memProperties.memoryTypeCount)
     {
-        size : vertices.sizeof,
-        // Possible to specify multiple purposes using a bitwase or.
-        usage : from!"erupted".VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        // Sharing between queue families.
-        sharingMode : from!"erupted".VK_SHARING_MODE_EXCLUSIVE,
-        // Configure sparse buffer memory.
-        flags : 0,
-    };
+        if((res.memRequirements.memoryTypeBits & (1 << i)) // Check memory type.
+            // Check the heap and its memory types properties.
+            && (memProperties.memoryTypes[i].propertyFlags & properties) == properties
+        )
+        {
+            res.chosenMemoryTypeIndex = i;
+            return ok(res.move);
+        }
+    }
 
-    return from!"erupted".vkCreateBuffer(res.device, &bufferInfo, null, &res.vertexBuffer) == from!"erupted".VK_SUCCESS
-        ? ok(res.move)
-        : err!Res("Failed to create vertex buffer.");
+    return err!Res("Falied to find suitable memory type.");
+}
+
+auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util : TupleCat, partialConstruct, TupleErase, erase;
+    import core.lifetime : forward, move;
+    import std.typecons : Tuple;
+    import std.meta : AliasSeq;
+    import erupted : VK_SUCCESS;
+    import expected : ok, err, andThen;
+
+    return (auto ref arg)
+    {
+        alias Res = TupleCat!(T, Tuple!(
+            from!"erupted".VkBuffer, "vertexBuffer",
+            from!"erupted".VkMemoryRequirements, "memRequirements",
+        ));
+        auto res = partialConstruct!Res(forward!arg);
+
+        const from!"erupted".VkBufferCreateInfo bufferInfo =
+        {
+            size : vertices.sizeof,
+            // Possible to specify multiple purposes using a bitwase or.
+            usage : from!"erupted".VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            // Sharing between queue families.
+            sharingMode : from!"erupted".VK_SHARING_MODE_EXCLUSIVE,
+            // Configure sparse buffer memory.
+            flags : 0,
+        };
+
+        if(from!"erupted".vkCreateBuffer(res.device, &bufferInfo, null, &res.vertexBuffer) != VK_SUCCESS)
+        {
+            return err!Res("Failed to create vertex buffer.");
+        }
+
+        from!"erupted".vkGetBufferMemoryRequirements(res.device, res.vertexBuffer, &res.memRequirements);
+
+        return ok(res.move);
+    }(forward!arg)
+    .andThen!findMemoryType(
+        from!"erupted".VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
+        from!"erupted".VK_MEMORY_PROPERTY_HOST_COHERENT_BIT // Data can be immediatly written to the memory by host.
+    )
+    .andThen!((auto ref arg)
+    {
+        import core.stdc.string : memcpy;
+        
+        alias TempRes = TupleCat!(typeof(arg), Tuple!(
+            from!"erupted".VkDeviceMemory, "vertexBufferMemory",
+        ));
+        alias toErase = AliasSeq!("memRequirements", "chosenMemoryType");
+        alias Res = TupleErase!(TempRes, toErase);
+        auto res = partialConstruct!TempRes(forward!arg);
+
+        from!"erupted".VkMemoryAllocateInfo allocInfo =
+        {
+            allocationSize : res.memRequirements.size,
+            memoryTypeIndex : res.chosenMemoryTypeIndex,
+        };
+
+        if(from!"erupted".vkAllocateMemory(res.device, &allocInfo, null, &res.vertexBufferMemory) != VK_SUCCESS)
+        {
+            return err!Res("Failed to allocate vertex buffer memory.");
+        }
+
+        // Device, vertex buffer, device memory and offset within the device memory.
+        from!"erupted".vkBindBufferMemory(res.device, res.vertexBuffer, res.vertexBufferMemory, 0);
+
+        void* data;
+        from!"erupted".vkMapMemory(res.device, res.vertexBufferMemory,
+            0, // Offset.
+            vertices.sizeof, // Size (or VK_WHOLE_SIZE).
+            0, // Flags, not used in current API.
+            &data
+        );
+        memcpy(data, vertices.ptr, vertices.sizeof);
+        from!"erupted".vkUnmapMemory(res.device, res.vertexBufferMemory);
+        
+        return ok(res.move.erase!toErase);
+    })
+    ;
 }
 
 auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
@@ -1438,6 +1526,7 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
 )
 {
@@ -1522,10 +1611,19 @@ if(from!"std.typecons".isTuple!T
             commandBuffer,
             from!"erupted".VK_PIPELINE_BIND_POINT_GRAPHICS,
             res.graphicsPipeline);
+
+        const from!"erupted".VkDeviceSize[1] offsets = [ 0 ];
+        from!"erupted".vkCmdBindVertexBuffers(
+            commandBuffer,
+            0, // Offset.
+            1, // Number of bindings.
+            &res.vertexBuffer,
+            offsets.ptr,
+        );
         
         from!"erupted".vkCmdDraw(
             commandBuffer,
-            3, // vertexCount.
+            vertices.length, // vertexCount.
             1, // instanceCount
             0, // firstVertex - lowest value of gl_VertexIndex
             0, // firstInstance - lowest value of gl_InstanceIndex
@@ -1812,6 +1910,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(typeof(arg.vertexBufferMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
@@ -1837,6 +1936,8 @@ if(from!"std.typecons".isTuple!T
             }
 
             from!"erupted".vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
+
+            from!"erupted".vkFreeMemory(arg.device, arg.vertexBufferMemory, null);
 
             from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
@@ -1872,6 +1973,7 @@ if(from!"std.typecons".isTuple!T
                 "surface",
                 "device",
                 "commandPool",
+                "vertexBufferMemory",
                 "vertexBuffer",
                 "imageAvailableSemaphores",
                 "renderFinishedSemaphores",
