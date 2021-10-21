@@ -80,8 +80,8 @@ immutable Vertex[3] vertices = ()
     import gfm.math : vec2f, vec3f;
     immutable Vertex[3] vertices = [
         { vec2f( 0.0f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
-        { vec2f( 0.0f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
-        { vec2f( 0.0f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
+        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 1.0f, 0.0f) },
+        { vec2f(-0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f) },
     ];
     return vertices;
 }();
@@ -1479,6 +1479,7 @@ if(from!"std.typecons".isTuple!T
             &data
         );
         memcpy(data, vertices.ptr, vertices.sizeof);
+        auto tmp = cast(void*)vertices.ptr;
         from!"erupted".vkUnmapMemory(res.device, res.vertexBufferMemory);
         
         return ok(res.move.erase!toErase);
