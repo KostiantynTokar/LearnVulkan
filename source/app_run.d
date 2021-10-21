@@ -1735,7 +1735,7 @@ if(from!"std.typecons".isTuple!T
         );
     
     uint imageIndex;
-    immutable result = from!"erupted".vkAcquireNextImageKHR(
+    immutable ackuireResult = from!"erupted".vkAcquireNextImageKHR(
         arg.device,
         arg.swapChain,
         ulong.max, // Timeout in nanoseconds. 64 unsigned max disables timeout.
@@ -1744,14 +1744,14 @@ if(from!"std.typecons".isTuple!T
         &imageIndex,
         );
     
-    if(result == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR || *arg.framebufferResized)
+    if(ackuireResult == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR || *arg.framebufferResized)
     {
         *arg.framebufferResized = false;
         return recreateSwapChain(forward!arg)
             .andThen!drawFrame(currentFrame)
             ;
     }
-    else if(result != VK_SUCCESS && result != from!"erupted".VK_SUBOPTIMAL_KHR)
+    else if(ackuireResult != VK_SUCCESS && ackuireResult != from!"erupted".VK_SUBOPTIMAL_KHR)
     {
         return err!T("Failed to acquire swap chain image.");
     }
@@ -1803,7 +1803,22 @@ if(from!"std.typecons".isTuple!T
         pResults : null,
     };
 
-    from!"erupted".vkQueuePresentKHR(arg.presentQueue, &presentInfo);
+    immutable presentResult = from!"erupted".vkQueuePresentKHR(arg.presentQueue, &presentInfo);
+
+    if(presentResult == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR ||
+        presentResult == from!"erupted".VK_SUBOPTIMAL_KHR ||
+        *arg.framebufferResized
+    )
+    {
+        *arg.framebufferResized = false;
+        return recreateSwapChain(forward!arg)
+            .andThen!drawFrame(currentFrame)
+            ;
+    }
+    else if(presentResult != VK_SUCCESS)
+    {
+        return err!T("Failed to present swap chain image.");
+    }
 
     return ok(forward!arg);
 }
