@@ -34,26 +34,29 @@ enum MaxFramesInFlight = 3;
 
 struct Vertex
 {
-    from!"gfm.math".vec2f pos;
-    from!"gfm.math".vec3f color;
+    import gfm.math : vec2f, vec3f;
+    import erupted;
 
-    static from!"erupted".VkVertexInputBindingDescription getBindingDescription() nothrow @nogc @trusted
+    vec2f pos;
+    vec3f color;
+
+    static VkVertexInputBindingDescription getBindingDescription() nothrow @nogc @trusted
     {
-        const from!"erupted".VkVertexInputBindingDescription bindingDescription =
+        const VkVertexInputBindingDescription bindingDescription =
         {
             // Index of the binding in the array of bindings of VkPipelineVertexInputStateCreateInfo.
             binding : 0,
             // Number of bytes from one entry to next.
             stride : Vertex.sizeof,
             // VERTEX or INSTANCE: move to next entry after each vertex/instance.
-            inputRate : from!"erupted".VK_VERTEX_INPUT_RATE_VERTEX,
+            inputRate : VK_VERTEX_INPUT_RATE_VERTEX,
         };
         return bindingDescription;
     }
 
-    static from!"erupted".VkVertexInputAttributeDescription[2] getAttributeDescriptions() nothrow @nogc @trusted
+    static VkVertexInputAttributeDescription[2] getAttributeDescriptions() nothrow @nogc @trusted
     {
-        const from!"erupted".VkVertexInputAttributeDescription[2] attributeDescriptions =
+        const VkVertexInputAttributeDescription[2] attributeDescriptions =
         [
             {
                 // From which binding data comes.
@@ -61,13 +64,13 @@ struct Vertex
                 // Input location in the vertex shader.
                 location : 0,
                 // Formats: R32[G32[B32[A32]]]_<SFLOAT|SINT|UINT> etc.
-                format : from!"erupted".VK_FORMAT_R32G32_SFLOAT,
+                format : VK_FORMAT_R32G32_SFLOAT,
                 offset : Vertex.pos.offsetof,
             },
             {
                 binding : 0,
                 location : 1,
-                format : from!"erupted".VK_FORMAT_R32G32B32_SFLOAT,
+                format : VK_FORMAT_R32G32B32_SFLOAT,
                 offset : Vertex.color.offsetof,
             },
         ];
@@ -89,13 +92,9 @@ immutable Vertex[3] vertices = ()
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T)
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
-    import std.experimental.allocator.mallocator;
-    import glfw_vulkan : glfwInit, glfwWindowHint, glfwCreateWindow,
-            glfwSetWindowUserPointer, glfwSetFramebufferSizeCallback, GLFWwindow,
-            GLFW_CLIENT_API, GLFW_NO_API, GLFW_RESIZABLE, GLFW_FALSE;
+    import util;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import glfw_vulkan;
     import expected : ok;
     import automem : RefCounted;
 
@@ -126,7 +125,6 @@ auto ref initVulkan(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T)
 {
     import core.lifetime : forward, move;
-    import std.meta : AliasSeq;
     import erupted.vulkan_lib_loader : loadGlobalLevelFunctions;
     import erupted : loadInstanceLevelFunctions, loadDeviceLevelFunctions;
     import expected : ok, err, andThen;
@@ -151,14 +149,10 @@ if(from!"std.typecons".isTuple!T)
 auto ref createInstance(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T)
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
-    import std.meta : AliasSeq;
+    import util;
     import std.experimental.allocator.mallocator : Mallocator;
     import std.experimental.allocator : makeArray, dispose;
-    import erupted : VkApplicationInfo, VkInstanceCreateInfo, vkCreateInstance, VkInstance,
-        VK_MAKE_API_VERSION, VK_API_VERSION_1_0, VK_SUCCESS;
+    import erupted;
     import glfw_vulkan : glfwGetRequiredInstanceExtensions;
     import expected : ok, err;
     
@@ -205,10 +199,11 @@ if(from!"std.typecons".isTuple!T)
 
     version(LearnVulkan_PrintExtensions)
     () @trusted {
-        import erupted : vkEnumerateInstanceExtensionProperties, VkExtensionProperties;
+        import erupted;
         import std.experimental.allocator.mallocator : Mallocator;
         import std.experimental.allocator : makeArray, dispose;
         import std.stdio : printf;
+
         uint extensionCount;
         vkEnumerateInstanceExtensionProperties(null, &extensionCount, null);
         auto extensions = Mallocator.instance.makeArray!VkExtensionProperties(extensionCount);
@@ -309,9 +304,7 @@ debug(LearnVulkan_ValidationLayers)
         && is(typeof(arg.instance) : from!"erupted".VkInstance)
     )
     {
-        import util : TupleCat, partialConstruct;
-        import core.lifetime : forward, move;
-        import std.typecons : Tuple;
+        import util;
         import erupted : vkCreateDebugUtilsMessengerEXT, VkDebugUtilsMessengerEXT, VK_SUCCESS;
         import expected : ok, err;
         
@@ -361,9 +354,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.instance) : from!"erupted".VkInstance)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import glfw_vulkan : glfwCreateWindowSurface;
     import erupted : VkSurfaceKHR, VK_SUCCESS;
     import expected : ok, err;
@@ -405,8 +396,7 @@ from!"optional".Optional!QueueFamilyIndices findQueueFamilies
 {
     import std.experimental.allocator.mallocator : Mallocator;
     import std.experimental.allocator : makeArray, dispose;
-    import erupted : VkQueueFamilyProperties, vkGetPhysicalDeviceQueueFamilyProperties,
-        vkGetPhysicalDeviceSurfaceSupportKHR, VkBool32, VK_QUEUE_GRAPHICS_BIT;
+    import erupted;
     import optional : Optional, match, some, none;
     
     uint queueFamilyCount;
@@ -452,11 +442,12 @@ from!"optional".Optional!QueueFamilyIndices findQueueFamilies
 struct SwapChainSupportDetails
 {
     import std.experimental.allocator.mallocator : Mallocator;
+    import erupted;
     import automem : Vector;
 
-    from!"erupted".VkSurfaceCapabilitiesKHR capabilities;
-    Vector!(from!"erupted".VkSurfaceFormatKHR, Mallocator) formats;
-    Vector!(from!"erupted".VkPresentModeKHR, Mallocator) presentModes;
+    VkSurfaceCapabilitiesKHR capabilities;
+    Vector!(VkSurfaceFormatKHR, Mallocator) formats;
+    Vector!(VkPresentModeKHR, Mallocator) presentModes;
 }
 
 SwapChainSupportDetails querySwapChainSupport(
@@ -464,9 +455,7 @@ SwapChainSupportDetails querySwapChainSupport(
     from!"erupted".VkSurfaceKHR surface,
     ) nothrow @nogc @trusted
 {
-    import erupted : vkGetPhysicalDeviceSurfaceCapabilitiesKHR,
-        vkGetPhysicalDeviceSurfaceFormatsKHR,
-        vkGetPhysicalDeviceSurfacePresentModesKHR;
+    import erupted;
     
     SwapChainSupportDetails details;
 
@@ -493,8 +482,10 @@ SwapChainSupportDetails querySwapChainSupport(
 
 struct ChosenSwapChainSupport
 {
-    from!"erupted".VkSurfaceFormatKHR surfaceFormat;
-    from!"erupted".VkPresentModeKHR presentMode;
+    import erupted;
+
+    VkSurfaceFormatKHR surfaceFormat;
+    VkPresentModeKHR presentMode;
     uint imageCount;
 }
 
@@ -542,9 +533,9 @@ from!"std.typecons".Tuple!(
     ) nothrow @nogc @trusted
 {
     import std.algorithm : clamp;
-    import erupted : vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+    import erupted;
 
-    from!"erupted".VkSurfaceCapabilitiesKHR capabilities;
+    VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &capabilities);
 
     if(capabilities.currentExtent.width != uint.max)
@@ -553,7 +544,7 @@ from!"std.typecons".Tuple!(
         return typeof(return)(capabilities.currentExtent, capabilities);
     }
 
-    from!"erupted".VkExtent2D actualExtent;
+    VkExtent2D actualExtent;
 
     actualExtent.width = framebufferWidth
         .clamp(
@@ -623,14 +614,12 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.instance) : from!"erupted".VkInstance)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.range : zip, repeat, takeOne;
     import std.algorithm : map, fold;
     import std.experimental.allocator.mallocator : Mallocator;
     import std.experimental.allocator : makeArray, dispose;
-    import erupted : VkPhysicalDevice, vkEnumeratePhysicalDevices, VK_NULL_HANDLE;
+    import erupted;
     import expected : ok, err, orElse;
     import optional : Optional, match;
 
@@ -691,11 +680,9 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.algorithm : sort, uniq;
-    import erupted : VkDevice;
+    import erupted;
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(VkDevice, "device"));
@@ -703,7 +690,7 @@ if(from!"std.typecons".isTuple!T
 
     enum queuesCount = res.queueFamilyIndices.tupleof.length;
 
-    from!"erupted".VkDeviceQueueCreateInfo[queuesCount] queueCreateInfos;
+    VkDeviceQueueCreateInfo[queuesCount] queueCreateInfos;
     uint[queuesCount] queueFamilies = [res.queueFamilyIndices.tupleof];
     immutable queuePriority = 1.0f;
     uint uniqueFamiliesCount = 0;
@@ -716,9 +703,9 @@ if(from!"std.typecons".isTuple!T
         ++uniqueFamiliesCount;
     }
 
-    const from!"erupted".VkPhysicalDeviceFeatures deviceFeatures;
+    const VkPhysicalDeviceFeatures deviceFeatures;
 
-    from!"erupted".VkDeviceCreateInfo createInfo =
+    VkDeviceCreateInfo createInfo =
     {
         pQueueCreateInfos : queueCreateInfos.ptr,
         queueCreateInfoCount : uniqueFamiliesCount,
@@ -740,7 +727,7 @@ if(from!"std.typecons".isTuple!T
         createInfo.enabledLayerCount = 0;
     }
 
-    return from!"erupted".vkCreateDevice(res.physicalDevice, &createInfo, null, &res.device) == from!"erupted".VK_SUCCESS
+    return vkCreateDevice(res.physicalDevice, &createInfo, null, &res.device) == VK_SUCCESS
         ? ok(res.move)
         : err!Res("Failed to create logical device.");
 }
@@ -751,9 +738,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import erupted : VkQueue, vkGetDeviceQueue;
 
     alias Res = TupleCat!(T, Tuple!(VkQueue, "graphicsQueue", VkQueue, "presentQueue"));
@@ -828,11 +813,9 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.chosenSwapChainSupport) : ChosenSwapChainSupport)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import glfw_vulkan : glfwGetFramebufferSize, glfwWaitEvents;
-    import erupted : VkSwapchainKHR, VkFormat, VkExtent2D;
+    import erupted;
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(
@@ -853,7 +836,7 @@ if(from!"std.typecons".isTuple!T
     immutable extentAndCapabilites = chooseSwapExtent(res.window, res.physicalDevice, res.surface, width, height);
     res.swapChainExtent = extentAndCapabilites.extent;
 
-    from!"erupted".VkSwapchainCreateInfoKHR createInfo =
+    VkSwapchainCreateInfoKHR createInfo =
     {
         surface : res.surface,
         minImageCount : res.chosenSwapChainSupport.imageCount,
@@ -863,15 +846,15 @@ if(from!"std.typecons".isTuple!T
         // Always 1 unless for stereoscopic 3D application.
         imageArrayLayers : 1,
         // Render directly to imega. Use VK_IMAGE_USAGE_TRANSFER_DST_BIT for off-screen rendering.
-        imageUsage : from!"erupted".VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        imageUsage : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         // Do not want any transforms applied to swap chain images.
         preTransform : extentAndCapabilites.capabilities.currentTransform,
         // Blending with other windows in the window system.
-        compositeAlpha : from!"erupted".VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        compositeAlpha : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         presentMode : res.chosenSwapChainSupport.presentMode,
         // Do not render obscured pixels.
-        clipped : from!"erupted".VK_TRUE,
-        oldSwapchain : from!"erupted".VK_NULL_HANDLE,
+        clipped : VK_TRUE,
+        oldSwapchain : VK_NULL_HANDLE,
     };
 
     if(res.queueFamilyIndices.graphicsFamily != res.queueFamilyIndices.presentFamily)
@@ -882,20 +865,20 @@ if(from!"std.typecons".isTuple!T
             res.queueFamilyIndices.presentFamily,
         ];
         // Can be exclusive (more performant), but it requires explicit ownership control.
-        createInfo.imageSharingMode = from!"erupted".VK_SHARING_MODE_CONCURRENT;
+        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         createInfo.queueFamilyIndexCount = 2;
         createInfo.pQueueFamilyIndices = queueFamilyIndicesArr.ptr;
     }
     else
     {
-        createInfo.imageSharingMode = from!"erupted".VK_SHARING_MODE_EXCLUSIVE;
+        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         createInfo.queueFamilyIndexCount = 0; // Optional
         createInfo.pQueueFamilyIndices = null; // Optional
     }
 
     res.swapChainImageFormat = createInfo.imageFormat;
 
-    return from!"erupted".vkCreateSwapchainKHR(res.device, &createInfo, null, &res.swapChain) == from!"erupted".VK_SUCCESS
+    return vkCreateSwapchainKHR(res.device, &createInfo, null, &res.swapChain) == VK_SUCCESS
         ? ok(res.move)
         : err!Res("Failed to create swap chain.");
 }
@@ -906,15 +889,13 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.experimental.allocator.mallocator : Mallocator;
-    import erupted : vkGetSwapchainImagesKHR;
+    import erupted;
     import expected : ok;
     import automem : Vector;
     
-    alias VectorType = Vector!(from!"erupted".VkImage, Mallocator);
+    alias VectorType = Vector!(VkImage, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainImages"));
     auto res = partialConstruct!Res(forward!arg);
 
@@ -932,15 +913,14 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.range : enumerate;
     import std.experimental.allocator.mallocator : Mallocator;
+    import erupted;
     import expected : ok, err;
     import automem : Vector;
 
-    alias VectorType = Vector!(from!"erupted".VkImageView, Mallocator);
+    alias VectorType = Vector!(VkImageView, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainImageViews"));
     auto res = partialConstruct!Res(forward!arg);
 
@@ -948,23 +928,23 @@ if(from!"std.typecons".isTuple!T
 
     foreach(i, ref image; res.swapChainImages[].enumerate)
     {
-        const from!"erupted".VkImageViewCreateInfo createInfo =
+        const VkImageViewCreateInfo createInfo =
         {
             image : image,
-            viewType : from!"erupted".VK_IMAGE_VIEW_TYPE_2D,
+            viewType : VK_IMAGE_VIEW_TYPE_2D,
             format : res.swapChainImageFormat,
 
             components : 
             {
-                r : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
-                g : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
-                b : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
-                a : from!"erupted".VK_COMPONENT_SWIZZLE_IDENTITY,
+                r : VK_COMPONENT_SWIZZLE_IDENTITY,
+                g : VK_COMPONENT_SWIZZLE_IDENTITY,
+                b : VK_COMPONENT_SWIZZLE_IDENTITY,
+                a : VK_COMPONENT_SWIZZLE_IDENTITY,
             },
 
             subresourceRange :
             {
-                aspectMask : from!"erupted".VK_IMAGE_ASPECT_COLOR_BIT,
+                aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
                 baseMipLevel : 0,
                 levelCount : 1,
                 baseArrayLayer : 0,
@@ -973,12 +953,12 @@ if(from!"std.typecons".isTuple!T
             },
         };
 
-        if(from!"erupted".vkCreateImageView(res.device, &createInfo, null, &res.swapChainImageViews.ptr[i])
-            != from!"erupted".VK_SUCCESS)
+        if(vkCreateImageView(res.device, &createInfo, null, &res.swapChainImageViews.ptr[i])
+            != VK_SUCCESS)
         {
             foreach(ref imageView; res.swapChainImageViews.ptr[0 .. i])
             {
-                from!"erupted".vkDestroyImageView(res.device, imageView, null);
+                vkDestroyImageView(res.device, imageView, null);
             }
             return err!Res("Failed to create image view.");
         }
@@ -993,10 +973,8 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
-    import erupted : VkRenderPass, VK_SUCCESS;
+    import util;
+    import erupted;
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(
@@ -1004,48 +982,48 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const from!"erupted".VkAttachmentDescription colorAttachment =
+    const VkAttachmentDescription colorAttachment =
     {
         format : res.swapChainImageFormat,
-        samples : from!"erupted".VK_SAMPLE_COUNT_1_BIT,
-        loadOp : from!"erupted".VK_ATTACHMENT_LOAD_OP_CLEAR,
-        storeOp : from!"erupted".VK_ATTACHMENT_STORE_OP_STORE,
-        stencilLoadOp : from!"erupted".VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        stencilStoreOp : from!"erupted".VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        initialLayout : from!"erupted".VK_IMAGE_LAYOUT_UNDEFINED,
-        finalLayout : from!"erupted".VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
+        samples : VK_SAMPLE_COUNT_1_BIT,
+        loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
+        storeOp : VK_ATTACHMENT_STORE_OP_STORE,
+        stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
+        finalLayout : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
     };
 
-    const from!"erupted".VkAttachmentReference colorAttachmentRef =
+    const VkAttachmentReference colorAttachmentRef =
     {
         attachment : 0, // Index in attachment array.
-        layout : from!"erupted".VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        layout : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     };
 
-    const from!"erupted".VkSubpassDescription subpass =
+    const VkSubpassDescription subpass =
     {
         // Use for graphics.
-        pipelineBindPoint : from!"erupted".VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelineBindPoint : VK_PIPELINE_BIND_POINT_GRAPHICS,
         colorAttachmentCount : 1,
         // Index in this array referenced from the fragment shader layout(location=0) out vec4 outColor directive.
         pColorAttachments : &colorAttachmentRef,
     };
 
-    const from!"erupted".VkSubpassDependency dependency =
+    const VkSubpassDependency dependency =
     {
-        srcSubpass : from!"erupted".VK_SUBPASS_EXTERNAL, // Refers to implicit subpass before and after render pass.
+        srcSubpass : VK_SUBPASS_EXTERNAL, // Refers to implicit subpass before and after render pass.
         dstSubpass : 0, // This subpass's index.
 
         // What operations to wait.
-        srcStageMask : from!"erupted".VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        srcStageMask : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         srcAccessMask : 0,
 
         // What operations are delayed.
-        dstStageMask : from!"erupted".VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        dstAccessMask : from!"erupted".VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        dstStageMask : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        dstAccessMask : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
     };
 
-    const from!"erupted".VkRenderPassCreateInfo renderPassInfo =
+    const VkRenderPassCreateInfo renderPassInfo =
     {
         attachmentCount : 1,
         pAttachments : &colorAttachment,
@@ -1056,7 +1034,7 @@ if(from!"std.typecons".isTuple!T
         pDependencies : &dependency,
     };
 
-    return from!"erupted".vkCreateRenderPass(res.device, &renderPassInfo, null, &res.renderPass) == VK_SUCCESS
+    return vkCreateRenderPass(res.device, &renderPassInfo, null, &res.renderPass) == VK_SUCCESS
         ? ok(res.move)
         : err!Res("Failed to create render pass.");
 }
@@ -1065,18 +1043,19 @@ auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code)
 in(cast(ptrdiff_t) code.ptr % 4 == 0)
 {
     import core.lifetime : move;
+    import erupted;
     import expected : ok, err;
     
-    alias Res = from!"erupted".VkShaderModule;
+    alias Res = VkShaderModule;
 
-    const from!"erupted".VkShaderModuleCreateInfo createInfo =
+    const VkShaderModuleCreateInfo createInfo =
     {
         codeSize : code.length,
         pCode : cast(const(uint)*) code.ptr,
     };
 
-    from!"erupted".VkShaderModule shaderModule;
-    return from!"erupted".vkCreateShaderModule(device, &createInfo, null, &shaderModule) == from!"erupted".VK_SUCCESS
+    VkShaderModule shaderModule;
+    return vkCreateShaderModule(device, &createInfo, null, &shaderModule) == VK_SUCCESS
         ? ok(shaderModule.move)
         : err!Res("Failed to create shader module");
 }
@@ -1106,10 +1085,8 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
-    import erupted : VkPipelineLayout, VkPipeline, vkDestroyShaderModule, VK_FALSE, VK_TRUE, VK_SUCCESS;
+    import util;
+    import erupted;
     import expected : ok, err, andThen, orElse;
 
     alias Res = TupleCat!(T, Tuple!
@@ -1125,16 +1102,16 @@ if(from!"std.typecons".isTuple!T
             return createShaderModule(res.device, "shaders_bin/frag.spv")
                 .andThen!((fragShaderModule) @trusted
                 {
-                    const from!"erupted".VkPipelineShaderStageCreateInfo[2] shaderStageInfos =
+                    const VkPipelineShaderStageCreateInfo[2] shaderStageInfos =
                     [
                         {
-                            stage : from!"erupted".VK_SHADER_STAGE_VERTEX_BIT,
+                            stage : VK_SHADER_STAGE_VERTEX_BIT,
                             module_ : vertShaderModule,
                             pName : "main", // Entry point.
                             pSpecializationInfo : null, // Specifying shader constants.
                         },
                         {
-                            stage : from!"erupted".VK_SHADER_STAGE_FRAGMENT_BIT,
+                            stage : VK_SHADER_STAGE_FRAGMENT_BIT,
                             module_ : fragShaderModule,
                             pName : "main", // Entry point.
                             pSpecializationInfo : null, // Specifying shader constants.
@@ -1144,7 +1121,7 @@ if(from!"std.typecons".isTuple!T
                     const bindingDescription = Vertex.getBindingDescription();
                     const attributeDescriptions = Vertex.getAttributeDescriptions();
 
-                    const from!"erupted".VkPipelineVertexInputStateCreateInfo vertexInputInfo =
+                    const VkPipelineVertexInputStateCreateInfo vertexInputInfo =
                     {
                         // Data is per-vertex or per-instance?
                         vertexBindingDescriptionCount : 1,
@@ -1154,13 +1131,13 @@ if(from!"std.typecons".isTuple!T
                         pVertexAttributeDescriptions : attributeDescriptions.ptr,
                     };
 
-                    const from!"erupted".VkPipelineInputAssemblyStateCreateInfo inputAssembly =
+                    const VkPipelineInputAssemblyStateCreateInfo inputAssembly =
                     {
-                        topology : from!"erupted".VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                        topology : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
                         primitiveRestartEnable : VK_FALSE,
                     };
 
-                    const from!"erupted".VkViewport viewport =
+                    const VkViewport viewport =
                     {
                         x : 0.0f,
                         y : 0.0f,
@@ -1170,13 +1147,13 @@ if(from!"std.typecons".isTuple!T
                         maxDepth : 1.0f,
                     };
 
-                    const from!"erupted".VkRect2D scissor =
+                    const VkRect2D scissor =
                     {
                         offset : {0, 0},
                         extent : res.swapChainExtent,
                     };
 
-                    const from!"erupted".VkPipelineViewportStateCreateInfo viewportState =
+                    const VkPipelineViewportStateCreateInfo viewportState =
                     {
                         viewportCount : 1, // Need extension for more then 1.
                         pViewports : &viewport,
@@ -1184,16 +1161,16 @@ if(from!"std.typecons".isTuple!T
                         pScissors : &scissor,
                     };
 
-                    const from!"erupted".VkPipelineRasterizationStateCreateInfo rasterizer =
+                    const VkPipelineRasterizationStateCreateInfo rasterizer =
                     {
                         depthClampEnable : VK_FALSE,
                         rasterizerDiscardEnable : VK_FALSE,
                         // Other modes require GPU feature.
-                        polygonMode : from!"erupted".VK_POLYGON_MODE_FILL,
+                        polygonMode : VK_POLYGON_MODE_FILL,
                         // 1 pixel wide. Thicker requires wideLines GPU feature.
                         lineWidth : 1.0f,
-                        cullMode : from!"erupted".VK_CULL_MODE_BACK_BIT,
-                        frontFace : from!"erupted".VK_FRONT_FACE_CLOCKWISE,
+                        cullMode : VK_CULL_MODE_BACK_BIT,
+                        frontFace : VK_FRONT_FACE_CLOCKWISE,
 
                         // Modify fragment's depth depending on its slope.
                         depthBiasEnable : VK_FALSE,
@@ -1203,10 +1180,10 @@ if(from!"std.typecons".isTuple!T
                     };
 
                     // Multisampling requires a GPU feature.
-                    const from!"erupted".VkPipelineMultisampleStateCreateInfo multisampling =
+                    const VkPipelineMultisampleStateCreateInfo multisampling =
                     {
                         sampleShadingEnable : VK_FALSE,
-                        rasterizationSamples : from!"erupted".VK_SAMPLE_COUNT_1_BIT,
+                        rasterizationSamples : VK_SAMPLE_COUNT_1_BIT,
                         minSampleShading : 1.0f, // Optional
                         pSampleMask : null, // Optional
                         alphaToCoverageEnable : VK_FALSE, // Optional
@@ -1214,50 +1191,50 @@ if(from!"std.typecons".isTuple!T
                     };
 
                     // Optional
-                    // from!"erupted".VkPipelineDepthStencilStateCreateInfo depthStencil;
+                    // VkPipelineDepthStencilStateCreateInfo depthStencil;
                     
                     // Framebuffer-specific blending options.
-                    const from!"erupted".VkPipelineColorBlendAttachmentState colorBlendAttachment =
+                    const VkPipelineColorBlendAttachmentState colorBlendAttachment =
                     {
                         colorWriteMask :
-                            from!"erupted".VK_COLOR_COMPONENT_R_BIT |
-                            from!"erupted".VK_COLOR_COMPONENT_G_BIT |
-                            from!"erupted".VK_COLOR_COMPONENT_B_BIT |
-                            from!"erupted".VK_COLOR_COMPONENT_A_BIT ,
+                            VK_COLOR_COMPONENT_R_BIT |
+                            VK_COLOR_COMPONENT_G_BIT |
+                            VK_COLOR_COMPONENT_B_BIT |
+                            VK_COLOR_COMPONENT_A_BIT ,
                         blendEnable : VK_FALSE,
-                        srcColorBlendFactor : from!"erupted".VK_BLEND_FACTOR_ONE, // Optional
-                        dstColorBlendFactor : from!"erupted".VK_BLEND_FACTOR_ZERO, // Optional
-                        colorBlendOp : from!"erupted".VK_BLEND_OP_ADD, // Optional
-                        srcAlphaBlendFactor : from!"erupted".VK_BLEND_FACTOR_ONE, // Optional
-                        dstAlphaBlendFactor : from!"erupted".VK_BLEND_FACTOR_ZERO, // Optional
-                        alphaBlendOp : from!"erupted".VK_BLEND_OP_ADD, // Optional
+                        srcColorBlendFactor : VK_BLEND_FACTOR_ONE, // Optional
+                        dstColorBlendFactor : VK_BLEND_FACTOR_ZERO, // Optional
+                        colorBlendOp : VK_BLEND_OP_ADD, // Optional
+                        srcAlphaBlendFactor : VK_BLEND_FACTOR_ONE, // Optional
+                        dstAlphaBlendFactor : VK_BLEND_FACTOR_ZERO, // Optional
+                        alphaBlendOp : VK_BLEND_OP_ADD, // Optional
                     };
 
                     // Global blending options
-                    const from!"erupted".VkPipelineColorBlendStateCreateInfo colorBlending =
+                    const VkPipelineColorBlendStateCreateInfo colorBlending =
                     {
                         // Bitwise blending disables framebuffer-specific blending.
                         logicOpEnable : VK_FALSE,
-                        logicOp : from!"erupted".VK_LOGIC_OP_COPY, // Optional
+                        logicOp : VK_LOGIC_OP_COPY, // Optional
                         attachmentCount : 1,
                         pAttachments : &colorBlendAttachment,
                         blendConstants : [ 0.0f, 0.0f, 0.0f, 0.0f ] // Optional
                     };
 
-                    // const from!"erupted".VkDynamicState[2] dynamicStates =
+                    // const VkDynamicState[2] dynamicStates =
                     // [
-                        // from!"erupted".VK_DYNAMIC_STATE_VIEWPORT,
-                        // from!"erupted".VK_DYNAMIC_STATE_LINE_WIDTH,
+                        // VK_DYNAMIC_STATE_VIEWPORT,
+                        // VK_DYNAMIC_STATE_LINE_WIDTH,
                     // ];
 
-                    // const from!"erupted".VkPipelineDynamicStateCreateInfo dynamicState =
+                    // const VkPipelineDynamicStateCreateInfo dynamicState =
                     // {
                     //     dynamicStateCount : 2,
                     //     pDynamicStates : dynamicStates.ptr,
                     // };
 
                     // Uniform variables and push constants
-                    const from!"erupted".VkPipelineLayoutCreateInfo pipelineLayoutInfo =
+                    const VkPipelineLayoutCreateInfo pipelineLayoutInfo =
                     {
                         setLayoutCount : 0, // Optional
                         pSetLayouts : null, // Optional
@@ -1265,13 +1242,13 @@ if(from!"std.typecons".isTuple!T
                         pPushConstantRanges : null, // Optional
                     };
 
-                    if(from!"erupted".vkCreatePipelineLayout(
+                    if(vkCreatePipelineLayout(
                         res.device, &pipelineLayoutInfo, null, &res.pipelineLayout) != VK_SUCCESS)
                     {
                         return err!Res("Failed to create pipeline layout.");
                     }
 
-                    const from!"erupted".VkGraphicsPipelineCreateInfo pipelineInfo =
+                    const VkGraphicsPipelineCreateInfo pipelineInfo =
                     {
                         stageCount : shaderStageInfos.length,
                         pStages : shaderStageInfos.ptr,
@@ -1288,12 +1265,12 @@ if(from!"std.typecons".isTuple!T
                         subpass : 0, // Subpass index of this pipeline.
                         // Specify parent pipelint with common settings.
                         // VK_PIPELINE_CREATE_DERIVATIVE_BIT in flag should be set.
-                        basePipelineHandle : from!"erupted".VK_NULL_HANDLE,
+                        basePipelineHandle : VK_NULL_HANDLE,
                         basePipelineIndex: -1,
                     };
 
-                    if(from!"erupted".vkCreateGraphicsPipelines(res.device,
-                        from!"erupted".VK_NULL_HANDLE, // VkPipelineCache of data relevant to pipeline creation.
+                    if(vkCreateGraphicsPipelines(res.device,
+                        VK_NULL_HANDLE, // VkPipelineCache of data relevant to pipeline creation.
                         1, &pipelineInfo, // Possible to create multiple pipelines at once.
                         null, &res.graphicsPipeline) != VK_SUCCESS)
                     {
@@ -1322,16 +1299,14 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.experimental.allocator.mallocator : Mallocator;
     import std.range : enumerate;
-    import erupted : VK_SUCCESS, vkCreateFramebuffer, vkDestroyFramebuffer;
+    import erupted;
     import expected : ok, err;
     import automem : Vector;
     
-    alias VectorType = Vector!(from!"erupted".VkFramebuffer, Mallocator);
+    alias VectorType = Vector!(VkFramebuffer, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainFramebuffers"));
     auto res = partialConstruct!Res(forward!arg);
 
@@ -1339,12 +1314,12 @@ if(from!"std.typecons".isTuple!T
 
     foreach (i, ref imageView; res.swapChainImageViews[].enumerate)
     {
-        const from!"erupted".VkImageView[1] attachments =
+        const VkImageView[1] attachments =
         [
             imageView,
         ];
 
-        const from!"erupted".VkFramebufferCreateInfo framebufferInfo =
+        const VkFramebufferCreateInfo framebufferInfo =
         {
             renderPass : res.renderPass,
             attachmentCount : 1,
@@ -1376,16 +1351,15 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.memRequirements) : from!"erupted".VkMemoryRequirements)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
+    import erupted;
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(uint, "chosenMemoryTypeIndex"));
     auto res = partialConstruct!Res(forward!arg);
     
-    from!"erupted".VkPhysicalDeviceMemoryProperties memProperties;
-    from!"erupted".vkGetPhysicalDeviceMemoryProperties(res.physicalDevice, &memProperties);
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(res.physicalDevice, &memProperties);
 
     foreach(i; 0 .. memProperties.memoryTypeCount)
     {
@@ -1412,38 +1386,36 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
 )
 {
-    import util : TupleCat, partialConstruct, TupleErase, erase;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.meta : AliasSeq;
-    import erupted : VK_SUCCESS;
+    import erupted;
     import expected : ok, err, andThen;
 
     return (auto ref arg)
     {
         alias Res = TupleCat!(T, Tuple!(
-            from!"erupted".VkBuffer, bufferName,
-            from!"erupted".VkMemoryRequirements, "memRequirements",
+            VkBuffer, bufferName,
+            VkMemoryRequirements, "memRequirements",
         ));
         auto res = partialConstruct!Res(forward!arg);
 
-        const from!"erupted".VkBufferCreateInfo bufferInfo =
+        const VkBufferCreateInfo bufferInfo =
         {
             size : size,
             // Possible to specify multiple purposes using a bitwase or.
             usage : usage,
             // Sharing between queue families.
-            sharingMode : from!"erupted".VK_SHARING_MODE_EXCLUSIVE,
+            sharingMode : VK_SHARING_MODE_EXCLUSIVE,
             // Configure sparse buffer memory.
             flags : 0,
         };
 
-        if(from!"erupted".vkCreateBuffer(res.device, &bufferInfo, null, &__traits(getMember, res, bufferName)) != VK_SUCCESS)
+        if(vkCreateBuffer(res.device, &bufferInfo, null, &__traits(getMember, res, bufferName)) != VK_SUCCESS)
         {
             return err!Res("Failed to create vertex buffer.");
         }
 
-        from!"erupted".vkGetBufferMemoryRequirements(res.device, res.vertexBuffer, &res.memRequirements);
+        vkGetBufferMemoryRequirements(res.device, res.vertexBuffer, &res.memRequirements);
 
         return ok(res.move);
     }(forward!arg)
@@ -1453,26 +1425,26 @@ if(from!"std.typecons".isTuple!T
         import core.stdc.string : memcpy;
         
         alias TempRes = TupleCat!(typeof(arg), Tuple!(
-            from!"erupted".VkDeviceMemory, deviceMemoryName,
+            VkDeviceMemory, deviceMemoryName,
         ));
         alias toErase = AliasSeq!("memRequirements", "chosenMemoryTypeIndex");
         alias Res = TupleErase!(TempRes, toErase);
         auto res = partialConstruct!TempRes(forward!arg);
 
-        const from!"erupted".VkMemoryAllocateInfo allocInfo =
+        const VkMemoryAllocateInfo allocInfo =
         {
             allocationSize : res.memRequirements.size,
             memoryTypeIndex : res.chosenMemoryTypeIndex,
         };
 
-        if(from!"erupted".vkAllocateMemory(
+        if(vkAllocateMemory(
             res.device, &allocInfo, null, &__traits(getMember, res, deviceMemoryName)) != VK_SUCCESS)
         {
             return err!Res("Failed to allocate buffer memory.");
         }
 
         // Device, vertex buffer, device memory and offset within the device memory.
-        from!"erupted".vkBindBufferMemory(res.device, __traits(getMember, res, bufferName), res.vertexBufferMemory, 0);
+        vkBindBufferMemory(res.device, __traits(getMember, res, bufferName), res.vertexBufferMemory, 0);
         
         return ok(res.move.erase!toErase);
     })
@@ -1484,33 +1456,31 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
 )
 {
-    import util : TupleCat, partialConstruct, TupleErase, erase;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.meta : AliasSeq;
-    import erupted : VK_SUCCESS;
+    import erupted;
     import expected : ok, err, andThen;
 
     return forward!arg.createBuffer!("vertexBuffer", "vertexBufferMemory")(
         vertices.sizeof,
         // Possible to specify multiple purposes using a bitwase or.
-        from!"erupted".VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        from!"erupted".VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
-        from!"erupted".VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // Data can be immediatly written to the memory by host.
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // Data can be immediatly written to the memory by host.
     )
     .andThen!((auto ref arg)
     {
         import core.stdc.string : memcpy;
 
         void* data;
-        from!"erupted".vkMapMemory(arg.device, arg.vertexBufferMemory,
+        vkMapMemory(arg.device, arg.vertexBufferMemory,
             0, // Offset.
             vertices.sizeof, // Size (or VK_WHOLE_SIZE).
             0, // Flags, not used in current API.
             &data
         );
         memcpy(data, vertices.ptr, vertices.sizeof);
-        from!"erupted".vkUnmapMemory(arg.device, arg.vertexBufferMemory);
+        vkUnmapMemory(arg.device, arg.vertexBufferMemory);
         
         return ok(forward!arg);
     })
@@ -1523,10 +1493,8 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.queueFamilyIndices) : QueueFamilyIndices)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
-    import erupted : VkCommandPool, vkCreateCommandPool, VK_SUCCESS;
+    import util;
+    import erupted;
     import expected : ok, err;
 
     alias Res = TupleCat!(T, Tuple!(
@@ -1534,14 +1502,14 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const from!"erupted".VkCommandPoolCreateInfo poolInfo =
+    const VkCommandPoolCreateInfo poolInfo =
     {
         queueFamilyIndex : res.queueFamilyIndices.graphicsFamily,
         flags : 0
             // Hint that command buffers are rerecorded with new commands very often.
-            // | from!"erupted".VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
+            // | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
             // Allow command buffers to be rerecorded individually, by default they are reset together.
-            // | from!"erupted".VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+            // | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
             ,
     };
 
@@ -1561,27 +1529,25 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.experimental.allocator.mallocator : Mallocator;
     import std.range : enumerate;
-    import erupted : VK_SUCCESS, vkAllocateCommandBuffers, vkBeginCommandBuffer;
+    import erupted;
     import expected : ok, err;
     import automem : Vector;
     
-    alias VectorType = Vector!(from!"erupted".VkCommandBuffer, Mallocator);
+    alias VectorType = Vector!(VkCommandBuffer, Mallocator);
     alias Res = TupleCat!(T, Tuple!(VectorType, "commandBuffers"));
     auto res = partialConstruct!Res(forward!arg);
 
     res.commandBuffers.length = res.swapChainFramebuffers.length;
 
-    const from!"erupted".VkCommandBufferAllocateInfo allocInfo =
+    const VkCommandBufferAllocateInfo allocInfo =
     {
         commandPool : res.commandPool,
         // Primary - can be submitted to a queue, but cannot be called from other command buffers.
         // Secondary - cannot be submitted directly, but can be called from primary command buffers.
-        level : from!"erupted".VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        level : VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         commandBufferCount : cast(uint) res.commandBuffers.length,
     };
 
@@ -1592,15 +1558,15 @@ if(from!"std.typecons".isTuple!T
 
     foreach(i, ref commandBuffer; res.commandBuffers[].enumerate)
     {
-        const from!"erupted".VkCommandBufferBeginInfo beginInfo =
+        const VkCommandBufferBeginInfo beginInfo =
         {
             flags : 0
                 // Buffer will be rerecorded right after executing it once.
-                // | from!"erupted".VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+                // | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
                 // This is a secondary command buffer that will be entirely within a single render pass.
-                // | from!"erupted".VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT
+                // | VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT
                 // Command buffer can be resubmitted while it is pending execution.
-                // | from!"erupted".VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT
+                // | VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT
                 , // Optional
             pInheritanceInfo : null, // Optional, for secondary buffer specifies what state to inherit from primary buffer.
         };
@@ -1610,7 +1576,7 @@ if(from!"std.typecons".isTuple!T
             return err!Res("Failed to begin recording command buffer.");
         }
 
-        const from!"erupted".VkClearValue clearColor =
+        const VkClearValue clearColor =
         {
             color :
             {
@@ -1618,7 +1584,7 @@ if(from!"std.typecons".isTuple!T
             },
         };
         
-        const from!"erupted".VkRenderPassBeginInfo renderPassInfo =
+        const VkRenderPassBeginInfo renderPassInfo =
         {
             renderPass : res.renderPass,
             framebuffer : res.swapChainFramebuffers.ptr[i],
@@ -1633,18 +1599,18 @@ if(from!"std.typecons".isTuple!T
 
         // Inline - render pass commands embedded in the primary command buffer, no secondary buffers will be executed.
         // Secondary command buffers - render pass commands will be executed from secondary buffers.
-        from!"erupted".vkCmdBeginRenderPass(
+        vkCmdBeginRenderPass(
             commandBuffer,
             &renderPassInfo,
-            from!"erupted".VK_SUBPASS_CONTENTS_INLINE);
+            VK_SUBPASS_CONTENTS_INLINE);
 
-        from!"erupted".vkCmdBindPipeline(
+        vkCmdBindPipeline(
             commandBuffer,
-            from!"erupted".VK_PIPELINE_BIND_POINT_GRAPHICS,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
             res.graphicsPipeline);
 
-        const from!"erupted".VkDeviceSize[1] offsets = [ 0 ];
-        from!"erupted".vkCmdBindVertexBuffers(
+        const VkDeviceSize[1] offsets = [ 0 ];
+        vkCmdBindVertexBuffers(
             commandBuffer,
             0, // Offset.
             1, // Number of bindings.
@@ -1652,7 +1618,7 @@ if(from!"std.typecons".isTuple!T
             offsets.ptr,
         );
         
-        from!"erupted".vkCmdDraw(
+        vkCmdDraw(
             commandBuffer,
             vertices.length, // vertexCount.
             1, // instanceCount
@@ -1660,9 +1626,9 @@ if(from!"std.typecons".isTuple!T
             0, // firstInstance - lowest value of gl_InstanceIndex
             );
         
-        from!"erupted".vkCmdEndRenderPass(commandBuffer);
+        vkCmdEndRenderPass(commandBuffer);
 
-        if(from!"erupted".vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+        if(vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
         {
             return err!Res("Failed to record command buffer.");
         }
@@ -1677,12 +1643,10 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
 )
 {
-    import util : TupleCat, partialConstruct;
-    import core.lifetime : forward, move;
-    import std.typecons : Tuple;
+    import util;
     import std.range : only;
     import std.experimental.allocator.mallocator : Mallocator;
-    import erupted : VkSemaphore, VkFence, VK_SUCCESS;
+    import erupted;
     import automem : Vector;
     import expected : ok, err;
 
@@ -1706,13 +1670,13 @@ if(from!"std.typecons".isTuple!T
         {
             foreach(l; 0 .. semaphores.length)
             {
-                from!"erupted".vkDestroySemaphore(res.device, (*semaphores[l])[k], null);
+                vkDestroySemaphore(res.device, (*semaphores[l])[k], null);
             }
-            from!"erupted".vkDestroyFence(res.device, res.inFlightFences[k], null);
+            vkDestroyFence(res.device, res.inFlightFences[k], null);
         }
         foreach(l; 0 .. j)
         {
-            from!"erupted".vkDestroySemaphore(res.device, (*semaphores[l])[i], null);
+            vkDestroySemaphore(res.device, (*semaphores[l])[i], null);
         }
     }
 
@@ -1720,19 +1684,19 @@ if(from!"std.typecons".isTuple!T
     {
         foreach(j; 0 .. semaphores.length)
         {
-            const from!"erupted".VkSemaphoreCreateInfo semaphoreInfo;
-            if(from!"erupted".vkCreateSemaphore(res.device, &semaphoreInfo, null, &(*semaphores[j])[i]) != VK_SUCCESS)
+            const VkSemaphoreCreateInfo semaphoreInfo;
+            if(vkCreateSemaphore(res.device, &semaphoreInfo, null, &(*semaphores[j])[i]) != VK_SUCCESS)
             {
                 destroyCreatedObjects(i, j);
                 return err!Res("Failed to create semaphore.");
             }
         }
 
-        const from!"erupted".VkFenceCreateInfo fenceInfo =
+        const VkFenceCreateInfo fenceInfo =
         {
-            flags : from!"erupted".VK_FENCE_CREATE_SIGNALED_BIT,
+            flags : VK_FENCE_CREATE_SIGNALED_BIT,
         };
-        if(from!"erupted".vkCreateFence(res.device, &fenceInfo, null, &res.inFlightFences[i]) != VK_SUCCESS)
+        if(vkCreateFence(res.device, &fenceInfo, null, &res.inFlightFences[i]) != VK_SUCCESS)
         {
             destroyCreatedObjects(i, semaphores.length);
             return err!Res("Failed to create fence.");
@@ -1756,16 +1720,16 @@ if(from!"std.typecons".isTuple!T
 )
 {
     import core.lifetime : forward;
-    import erupted : vkQueueSubmit, VK_NULL_HANDLE, VK_SUCCESS, VK_TRUE;
+    import erupted;
     import expected : ok, err, andThen;
 
-    from!"erupted".vkWaitForFences(arg.device, 1, &arg.inFlightFences[currentFrame],
+    vkWaitForFences(arg.device, 1, &arg.inFlightFences[currentFrame],
         VK_TRUE, // Whether to wait all fences in the array or any of the fences.
         ulong.max
         );
     
     uint imageIndex;
-    immutable ackuireResult = from!"erupted".vkAcquireNextImageKHR(
+    immutable ackuireResult = vkAcquireNextImageKHR(
         arg.device,
         arg.swapChain,
         ulong.max, // Timeout in nanoseconds. 64 unsigned max disables timeout.
@@ -1774,21 +1738,21 @@ if(from!"std.typecons".isTuple!T
         &imageIndex,
         );
     
-    if(ackuireResult == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR || *arg.framebufferResized)
+    if(ackuireResult == VK_ERROR_OUT_OF_DATE_KHR || *arg.framebufferResized)
     {
         *arg.framebufferResized = false;
         return recreateSwapChain(forward!arg)
             .andThen!drawFrame(currentFrame)
             ;
     }
-    else if(ackuireResult != VK_SUCCESS && ackuireResult != from!"erupted".VK_SUBOPTIMAL_KHR)
+    else if(ackuireResult != VK_SUCCESS && ackuireResult != VK_SUBOPTIMAL_KHR)
     {
         return err!T("Failed to acquire swap chain image.");
     }
     
     if(arg.imagesInFlight.ptr[imageIndex] != VK_NULL_HANDLE)
     {
-        from!"erupted".vkWaitForFences(arg.device, 1, &arg.imagesInFlight.ptr[imageIndex],
+        vkWaitForFences(arg.device, 1, &arg.imagesInFlight.ptr[imageIndex],
             VK_TRUE, // Whether to wait all fences in the array or any of the fences.
             ulong.max
             );
@@ -1796,12 +1760,12 @@ if(from!"std.typecons".isTuple!T
 
     arg.imagesInFlight.ptr[imageIndex] = arg.inFlightFences[currentFrame];
     
-    const from!"erupted".VkPipelineStageFlags[1] waitStages =
+    const VkPipelineStageFlags[1] waitStages =
     [
-        from!"erupted".VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
     ];
 
-    const from!"erupted".VkSubmitInfo submitInfo =
+    const VkSubmitInfo submitInfo =
     {
         waitSemaphoreCount : 1,
         pWaitSemaphores : &arg.imageAvailableSemaphores[currentFrame],
@@ -1814,13 +1778,13 @@ if(from!"std.typecons".isTuple!T
         pSignalSemaphores : &arg.renderFinishedSemaphores[currentFrame],
     };
 
-    from!"erupted".vkResetFences(arg.device, 1, &arg.inFlightFences[currentFrame]);
+    vkResetFences(arg.device, 1, &arg.inFlightFences[currentFrame]);
     if(vkQueueSubmit(arg.graphicsQueue, 1, &submitInfo, arg.inFlightFences[currentFrame]) != VK_SUCCESS)
     {
         return err!T("Failed to submit draw command buffer.");
     }
 
-    const from!"erupted".VkPresentInfoKHR presentInfo =
+    const VkPresentInfoKHR presentInfo =
     {
         waitSemaphoreCount : 1,
         pWaitSemaphores : &arg.renderFinishedSemaphores[currentFrame],
@@ -1833,10 +1797,10 @@ if(from!"std.typecons".isTuple!T
         pResults : null,
     };
 
-    immutable presentResult = from!"erupted".vkQueuePresentKHR(arg.presentQueue, &presentInfo);
+    immutable presentResult = vkQueuePresentKHR(arg.presentQueue, &presentInfo);
 
-    if(presentResult == from!"erupted".VK_ERROR_OUT_OF_DATE_KHR ||
-        presentResult == from!"erupted".VK_SUBOPTIMAL_KHR ||
+    if(presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
+        presentResult == VK_SUBOPTIMAL_KHR ||
         *arg.framebufferResized
     )
     {
@@ -1868,6 +1832,7 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
 {
     import core.lifetime : move, forward;
     import glfw_vulkan : glfwWindowShouldClose, glfwPollEvents;
+    import erupted : vkDeviceWaitIdle;
     import expected : ok, err;
 
     size_t currentFrame = 0;
@@ -1885,7 +1850,7 @@ auto ref mainLoop(T)(auto ref T arg) nothrow @nogc @trusted
         currentFrame = (currentFrame + 1) % MaxFramesInFlight;
     }
 
-    from!"erupted".vkDeviceWaitIdle(exp.value.device);
+    vkDeviceWaitIdle(exp.value.device);
     return exp;
 }
 
@@ -1905,26 +1870,27 @@ if(from!"std.typecons".isTuple!T
     import util : erase;
     import core.lifetime : forward;
     import std.meta : AliasSeq;
+    import erupted;
     import expected : ok;
 
     foreach(ref framebuffer; arg.swapChainFramebuffers[])
     {
-        from!"erupted".vkDestroyFramebuffer(arg.device, framebuffer, null);
+        vkDestroyFramebuffer(arg.device, framebuffer, null);
     }
 
-    from!"erupted".vkFreeCommandBuffers(arg.device, arg.commandPool,
+    vkFreeCommandBuffers(arg.device, arg.commandPool,
         cast(uint) arg.commandBuffers.length, arg.commandBuffers.ptr);
 
-    from!"erupted".vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
-    from!"erupted".vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
-    from!"erupted".vkDestroyRenderPass(arg.device, arg.renderPass, null);
+    vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
+    vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
+    vkDestroyRenderPass(arg.device, arg.renderPass, null);
 
     foreach(ref imageView; arg.swapChainImageViews[])
     {
-        from!"erupted".vkDestroyImageView(arg.device, imageView, null);
+        vkDestroyImageView(arg.device, imageView, null);
     }
 
-    from!"erupted".vkDestroySwapchainKHR(arg.device, arg.swapChain, null);
+    vkDestroySwapchainKHR(arg.device, arg.swapChain, null);
 
     alias toErase = AliasSeq!(
         "swapChainImageFormat",
@@ -1967,6 +1933,7 @@ if(from!"std.typecons".isTuple!T
     import util : erase;
     import core.lifetime : forward;
     import std.meta : AliasSeq;
+    import erupted;
     import erupted.vulkan_lib_loader : freeVulkanLib;
     import glfw_vulkan : glfwDestroyWindow, glfwTerminate;
     import expected : ok, andThen;
@@ -1976,18 +1943,18 @@ if(from!"std.typecons".isTuple!T
         {
             foreach(i; 0 .. MaxFramesInFlight)
             {
-                from!"erupted".vkDestroyFence(arg.device, arg.inFlightFences[i], null);
-                from!"erupted".vkDestroySemaphore(arg.device, arg.renderFinishedSemaphores[i], null);
-                from!"erupted".vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
+                vkDestroyFence(arg.device, arg.inFlightFences[i], null);
+                vkDestroySemaphore(arg.device, arg.renderFinishedSemaphores[i], null);
+                vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
             }
 
-            from!"erupted".vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
+            vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
 
-            from!"erupted".vkFreeMemory(arg.device, arg.vertexBufferMemory, null);
+            vkFreeMemory(arg.device, arg.vertexBufferMemory, null);
 
-            from!"erupted".vkDestroyCommandPool(arg.device, arg.commandPool, null);
+            vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
-            from!"erupted".vkDestroyDevice(arg.device, null);
+            vkDestroyDevice(arg.device, null);
 
             debug(LearnVulkan_ValidationLayers)
             {
@@ -1995,8 +1962,8 @@ if(from!"std.typecons".isTuple!T
                 vkDestroyDebugUtilsMessengerEXT(arg.instance, arg.debugMessenger, null);
             }
 
-            from!"erupted".vkDestroySurfaceKHR(arg.instance, arg.surface, null);
-            from!"erupted".vkDestroyInstance(arg.instance, null);
+            vkDestroySurfaceKHR(arg.instance, arg.surface, null);
+            vkDestroyInstance(arg.instance, null);
 
             glfwDestroyWindow(arg.window);
             glfwTerminate();

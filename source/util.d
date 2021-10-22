@@ -2,6 +2,9 @@ module util;
 
 import from : from;
 
+public import core.lifetime : forward, move;
+public import std.typecons : Tuple;
+
 bool implies(in bool antecedent, in bool consequent) pure nothrow @nogc @safe
 {
     return (!antecedent) || consequent;
