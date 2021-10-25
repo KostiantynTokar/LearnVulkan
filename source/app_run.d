@@ -1377,11 +1377,13 @@ if(from!"std.typecons".isTuple!T
     return err!T("Falied to find suitable memory type.");
 }
 
-auto createBuffer(string bufferName, string deviceMemoryName, T)(
+auto createBuffer(T)(
     auto ref T arg,
-    from!"erupted".VkDeviceSize size,
-    from!"erupted".VkBufferUsageFlags usage,
-    from!"erupted".VkMemoryPropertyFlags properties,
+    in from!"erupted".VkDeviceSize size,
+    in from!"erupted".VkBufferUsageFlags usage,
+    in from!"erupted".VkMemoryPropertyFlags properties,
+    out from!"erupted".VkBuffer buffer,
+    out from!"erupted".VkDeviceMemory bufferMemory,
 ) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -1397,11 +1399,6 @@ if(from!"std.typecons".isTuple!T
 
     return (auto ref arg)
     {
-        alias Res = TupleCat!(T, Tuple!(
-            VkBuffer, bufferName,
-        ));
-        auto res = partialConstruct!Res(forward!arg);
-
         const VkBufferCreateInfo bufferInfo =
         {
             size : size,
@@ -1413,24 +1410,19 @@ if(from!"std.typecons".isTuple!T
             flags : 0,
         };
 
-        if(vkCreateBuffer(res.device, &bufferInfo, null, &__traits(getMember, res, bufferName)) != VK_SUCCESS)
+        if(vkCreateBuffer(arg.device, &bufferInfo, null, &buffer) != VK_SUCCESS)
         {
-            return err!Res("Failed to create vertex buffer.");
+            return err!T("Failed to create vertex buffer.");
         }
 
-        vkGetBufferMemoryRequirements(res.device, __traits(getMember, res, bufferName), &memRequirements);
+        vkGetBufferMemoryRequirements(arg.device, buffer, &memRequirements);
 
-        return ok(res.move);
+        return ok(forward!arg);
     }(forward!arg)
     .andThen!findMemoryType(memRequirements, properties, chosenMemoryTypeIndex)
     .andThen!((auto ref arg)
     {
         import core.stdc.string : memcpy;
-        
-        alias Res = TupleCat!(typeof(arg), Tuple!(
-            VkDeviceMemory, deviceMemoryName,
-        ));
-        auto res = partialConstruct!Res(forward!arg);
 
         const VkMemoryAllocateInfo allocInfo =
         {
@@ -1439,15 +1431,15 @@ if(from!"std.typecons".isTuple!T
         };
 
         if(vkAllocateMemory(
-            res.device, &allocInfo, null, &__traits(getMember, res, deviceMemoryName)) != VK_SUCCESS)
+            arg.device, &allocInfo, null, &bufferMemory) != VK_SUCCESS)
         {
-            return err!Res("Failed to allocate buffer memory.");
+            return err!T("Failed to allocate buffer memory.");
         }
 
         // Device, vertex buffer, device memory and offset within the device memory.
-        vkBindBufferMemory(res.device, __traits(getMember, res, bufferName), __traits(getMember, res, deviceMemoryName), 0);
+        vkBindBufferMemory(arg.device, buffer, bufferMemory, 0);
         
-        return ok(res.move);
+        return ok(forward!arg);
     })
     ;
 }
@@ -1514,50 +1506,62 @@ if(from!"std.typecons".isTuple!T
     import erupted;
     import expected : ok, err, andThen;
 
-    static auto localCreateVertexBuffer(Args...)(auto ref Args args)
-    {
-        return createBuffer!("vertexBuffer", "vertexBufferMemory")(forward!args);
-    }
-
     immutable VkDeviceSize bufferSize = vertices.sizeof;
 
-    return forward!arg.createBuffer!("stagingBuffer", "stagingBufferMemory")(
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
+
+    return forward!arg.createBuffer(
         bufferSize,
         // Possible to specify multiple purposes using a bitwase or.
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // Data can be immediatly written to the memory by host.
+        stagingBuffer,
+        stagingBufferMemory,
     )
     .andThen!((auto ref arg)
     {
         import core.stdc.string : memcpy;
 
         void* data;
-        vkMapMemory(arg.device, arg.stagingBufferMemory,
+        vkMapMemory(arg.device, stagingBufferMemory,
             0, // Offset.
             bufferSize, // Size (or VK_WHOLE_SIZE).
             0, // Flags, not used in current API.
             &data
         );
         memcpy(data, vertices.ptr, vertices.sizeof);
-        vkUnmapMemory(arg.device, arg.stagingBufferMemory);
+        vkUnmapMemory(arg.device, stagingBufferMemory);
         
         return ok(forward!arg);
     })
-    .andThen!localCreateVertexBuffer(
+    .andThen!createBuffer(
         bufferSize,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        vertexBuffer,
+        vertexBufferMemory,
     )
     .andThen!((auto ref arg)
     {
+        alias Res = TupleCat!(T, Tuple!(
+            VkBuffer, "vertexBuffer",
+            VkDeviceMemory, "vertexBufferMemory",
+        ));
+        auto res = partialConstruct!Res(forward!arg);
+        res.vertexBuffer = vertexBuffer.move;
+        res.vertexBufferMemory = vertexBufferMemory.move;
+
         copyBuffer(
-            arg.device, arg.commandPool, arg.graphicsQueue,
-            arg.stagingBuffer, arg.vertexBuffer, bufferSize
+            res.device, res.commandPool, res.graphicsQueue,
+            stagingBuffer, res.vertexBuffer, bufferSize
         );
-        vkDestroyBuffer(arg.device, arg.stagingBuffer, null);
-        vkFreeMemory(arg.device, arg.stagingBufferMemory, null);
-        return ok(forward!arg.erase!("stagingBuffer", "stagingBufferMemory"));
+        vkDestroyBuffer(res.device, stagingBuffer, null);
+        vkFreeMemory(res.device, stagingBufferMemory, null);
+        return ok(res.move);
     })
     ;
 }
@@ -1571,50 +1575,62 @@ if(from!"std.typecons".isTuple!T
     import erupted;
     import expected : ok, err, andThen;
 
-    static auto localCreateIndexBuffer(Args...)(auto ref Args args)
-    {
-        return createBuffer!("indexBuffer", "indexBufferMemory")(forward!args);
-    }
-
     immutable VkDeviceSize bufferSize = indices.sizeof;
 
-    return forward!arg.createBuffer!("stagingBuffer", "stagingBufferMemory")(
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    VkBuffer indexBuffer;
+    VkDeviceMemory indexBufferMemory;
+
+    return forward!arg.createBuffer(
         bufferSize,
         // Possible to specify multiple purposes using a bitwase or.
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // Data can be immediatly written to the memory by host.
+        stagingBuffer,
+        stagingBufferMemory,
     )
     .andThen!((auto ref arg)
     {
         import core.stdc.string : memcpy;
 
         void* data;
-        vkMapMemory(arg.device, arg.stagingBufferMemory,
+        vkMapMemory(arg.device, stagingBufferMemory,
             0, // Offset.
             bufferSize, // Size (or VK_WHOLE_SIZE).
             0, // Flags, not used in current API.
             &data
         );
         memcpy(data, indices.ptr, indices.sizeof);
-        vkUnmapMemory(arg.device, arg.stagingBufferMemory);
+        vkUnmapMemory(arg.device, stagingBufferMemory);
         
         return ok(forward!arg);
     })
-    .andThen!localCreateIndexBuffer(
+    .andThen!createBuffer(
         bufferSize,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        indexBuffer,
+        indexBufferMemory,
     )
     .andThen!((auto ref arg)
     {
+        alias Res = TupleCat!(T, Tuple!(
+            VkBuffer, "indexBuffer",
+            VkDeviceMemory, "indexBufferMemory",
+        ));
+        auto res = partialConstruct!Res(forward!arg);
+        res.indexBuffer = indexBuffer.move;
+        res.indexBufferMemory = indexBufferMemory.move;
+
         copyBuffer(
-            arg.device, arg.commandPool, arg.graphicsQueue,
-            arg.stagingBuffer, arg.indexBuffer, bufferSize
+            res.device, res.commandPool, res.graphicsQueue,
+            stagingBuffer, res.indexBuffer, bufferSize
         );
-        vkDestroyBuffer(arg.device, arg.stagingBuffer, null);
-        vkFreeMemory(arg.device, arg.stagingBufferMemory, null);
-        return ok(forward!arg.erase!("stagingBuffer", "stagingBufferMemory"));
+        vkDestroyBuffer(res.device, stagingBuffer, null);
+        vkFreeMemory(res.device, stagingBufferMemory, null);
+        return ok(res.move);
     })
     ;
 }
