@@ -150,11 +150,10 @@ if(from!"std.typecons".isTuple!T)
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
         .andThen!getDeviceQueues
         .andThen!createDescriptorSetLayout
-        .andThen!createSwapChainAndRelatedObjects
         .andThen!createCommandPool
         .andThen!createVertexBuffer
         .andThen!createIndexBuffer
-        .andThen!createCommandBuffers
+        .andThen!createSwapChainAndRelatedObjects
         .andThen!createSyncObjects
         ;
 }
@@ -779,23 +778,7 @@ if(from!"std.typecons".isTuple!T
 
     return cleanupSwapChain(forward!arg)
         .andThen!createSwapChainAndRelatedObjects
-        .andThen!recreateCommandBuffers
         ;
-}
-
-auto ref recreateCommandBuffers(T)(auto ref T arg) nothrow @nogc @trusted
-if(from!"std.typecons".isTuple!T
-    && is(typeof(arg.device) : from!"erupted".VkDevice)
-    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
-    && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
-    && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
-    && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
-    && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
-)
-{
-    import util : erase;
-    import core.lifetime : forward;
-    return createCommandBuffers(forward!arg.erase!"commandBuffers");
 }
 
 auto ref createSwapChainAndRelatedObjects(T)(auto ref T arg) nothrow @nogc @trusted
@@ -818,6 +801,7 @@ if(from!"std.typecons".isTuple!T
         .andThen!createUniformBuffers
         .andThen!createDescriptorPool
         .andThen!createDescriptorSets
+        .andThen!createCommandBuffers
         ;
 }
 
@@ -2337,6 +2321,7 @@ if(from!"std.typecons".isTuple!T
         "uniformBuffersMemory",
         "descriptorPool",
         "descriptorSets",
+        "commandBuffers",
         );
     return ok(forward!arg.erase!toErase);
 }
