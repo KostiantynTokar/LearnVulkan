@@ -816,6 +816,7 @@ if(from!"std.typecons".isTuple!T
         .andThen!createGraphicsPipeline
         .andThen!createFramebuffers
         .andThen!createUniformBuffers
+        .andThen!createDescriptorPool
         ;
 }
 
@@ -1734,6 +1735,43 @@ if(from!"std.typecons".isTuple!T
     ;
 }
 
+auto createDescriptorPool(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkDescriptorPool, "descriptorPool",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const VkDescriptorPoolSize poolSize =
+    {
+        type : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        descriptorCount : cast(uint) res.swapChainImages.length,
+    };
+
+    const VkDescriptorPoolCreateInfo poolInfo =
+    {
+        poolSizeCount : 1,
+        pPoolSizes : &poolSize,
+        // Maximum number of descriptor sets that can be allocated.
+        maxSets : cast(uint) res.swapChainImages.length,
+        flags : 0
+            // If individual descriptor sets can be free.
+            // | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT
+    };
+    
+    return vkCreateDescriptorPool(res.device, &poolInfo, null, &res.descriptorPool) == VK_SUCCESS
+        ? ok(res.move)
+        : err!Res("Failed to create descriptor pool");
+}
+
 auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -2155,6 +2193,7 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.uniformBuffersMemory[])) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.descriptorPool) : from!"erupted".VkDescriptorPool)
 )
 {
     import util : erase;
@@ -2162,6 +2201,8 @@ if(from!"std.typecons".isTuple!T
     import std.meta : AliasSeq;
     import erupted;
     import expected : ok;
+
+    vkDestroyDescriptorPool(arg.device, arg.descriptorPool, null);
 
     foreach(ref uniformBuffer; arg.uniformBuffers[])
     {
@@ -2203,6 +2244,7 @@ if(from!"std.typecons".isTuple!T
         "swapChainFramebuffers",
         "uniformBuffers",
         "uniformBuffersMemory",
+        "descriptorPool",
         );
     return ok(forward!arg.erase!toErase);
 }
