@@ -1415,7 +1415,7 @@ if(from!"std.typecons".isTuple!T
             return err!Res("Failed to create vertex buffer.");
         }
 
-        vkGetBufferMemoryRequirements(res.device, res.vertexBuffer, &res.memRequirements);
+        vkGetBufferMemoryRequirements(res.device, __traits(getMember, res, bufferName), &res.memRequirements);
 
         return ok(res.move);
     }(forward!arg)
@@ -1444,11 +1444,64 @@ if(from!"std.typecons".isTuple!T
         }
 
         // Device, vertex buffer, device memory and offset within the device memory.
-        vkBindBufferMemory(res.device, __traits(getMember, res, bufferName), res.vertexBufferMemory, 0);
+        vkBindBufferMemory(res.device, __traits(getMember, res, bufferName), __traits(getMember, res, deviceMemoryName), 0);
         
         return ok(res.move.erase!toErase);
     })
     ;
+}
+
+void copyBuffer(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkBuffer srcBuffer,
+    from!"erupted".VkBuffer dstBuffer,
+    from!"erupted".VkDeviceSize size,
+) nothrow @nogc @trusted
+{
+    import erupted;
+
+    const VkCommandBufferAllocateInfo allocInfo =
+    {
+        level : VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        commandPool : commandPool,
+        commandBufferCount : 1,
+    };
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+
+    const VkCommandBufferBeginInfo beginInfo =
+    {
+        flags : VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo); // TODO: check result?
+
+    VkBufferCopy copyRegion =
+    {
+        srcOffset : 0, // Optional
+        dstOffset : 0, // Optional
+        // Not possible to specify VK_WHOLE_SIZE, unlike the vkMapMemory.
+        size : size,
+    };
+
+    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    vkEndCommandBuffer(commandBuffer); // TODO: check result?
+
+    VkSubmitInfo submitInfo =
+    {
+        commandBufferCount : 1,
+        pCommandBuffers : &commandBuffer,
+    };
+
+    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    // For multiple copies at once it is better to use fences and wait all at once.
+    vkQueueWaitIdle(transferQueue);
+
+    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }
 
 auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
@@ -1461,10 +1514,17 @@ if(from!"std.typecons".isTuple!T
     import erupted;
     import expected : ok, err, andThen;
 
-    return forward!arg.createBuffer!("vertexBuffer", "vertexBufferMemory")(
-        vertices.sizeof,
+    static auto localCreateVertexBuffer(Args...)(auto ref Args args)
+    {
+        return createBuffer!("vertexBuffer", "vertexBufferMemory")(forward!args);
+    }
+
+    immutable VkDeviceSize bufferSize = vertices.sizeof;
+
+    return forward!arg.createBuffer!("stagingBuffer", "stagingBufferMemory")(
+        bufferSize,
         // Possible to specify multiple purposes using a bitwase or.
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // Data can be immediatly written to the memory by host.
     )
@@ -1473,16 +1533,31 @@ if(from!"std.typecons".isTuple!T
         import core.stdc.string : memcpy;
 
         void* data;
-        vkMapMemory(arg.device, arg.vertexBufferMemory,
+        vkMapMemory(arg.device, arg.stagingBufferMemory,
             0, // Offset.
             vertices.sizeof, // Size (or VK_WHOLE_SIZE).
             0, // Flags, not used in current API.
             &data
         );
         memcpy(data, vertices.ptr, vertices.sizeof);
-        vkUnmapMemory(arg.device, arg.vertexBufferMemory);
+        vkUnmapMemory(arg.device, arg.stagingBufferMemory);
         
         return ok(forward!arg);
+    })
+    .andThen!localCreateVertexBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    )
+    .andThen!((auto ref arg)
+    {
+        copyBuffer(
+            arg.device, arg.commandPool, arg.graphicsQueue,
+            arg.stagingBuffer, arg.vertexBuffer, bufferSize
+        );
+        vkDestroyBuffer(arg.device, arg.stagingBuffer, null);
+        vkFreeMemory(arg.device, arg.stagingBufferMemory, null);
+        return ok(forward!arg.erase!("stagingBuffer", "stagingBufferMemory"));
     })
     ;
 }
