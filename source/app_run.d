@@ -78,16 +78,18 @@ struct Vertex
     }
 }
 
-immutable Vertex[3] vertices = ()
+immutable Vertex[4] vertices = ()
 {
     import gfm.math : vec2f, vec3f;
-    immutable Vertex[3] vertices = [
-        { vec2f( 0.0f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
-        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 1.0f, 0.0f) },
+    immutable Vertex[4] vertices = [
+        { vec2f(-0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
+        { vec2f( 0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f) },
+        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f) },
         { vec2f(-0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f) },
     ];
     return vertices;
 }();
+immutable ushort[6] indices = [ 0, 1, 2, 2, 3, 0];
 
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T)
@@ -141,6 +143,7 @@ if(from!"std.typecons".isTuple!T)
         .andThen!createSwapChainAndRelatedObjects
         .andThen!createCommandPool
         .andThen!createVertexBuffer
+        .andThen!createIndexBuffer
         .andThen!createCommandBuffers
         .andThen!createSyncObjects
         ;
@@ -1510,7 +1513,6 @@ if(from!"std.typecons".isTuple!T
 )
 {
     import util;
-    import std.meta : AliasSeq;
     import erupted;
     import expected : ok, err, andThen;
 
@@ -1535,7 +1537,7 @@ if(from!"std.typecons".isTuple!T
         void* data;
         vkMapMemory(arg.device, arg.stagingBufferMemory,
             0, // Offset.
-            vertices.sizeof, // Size (or VK_WHOLE_SIZE).
+            bufferSize, // Size (or VK_WHOLE_SIZE).
             0, // Flags, not used in current API.
             &data
         );
@@ -1554,6 +1556,63 @@ if(from!"std.typecons".isTuple!T
         copyBuffer(
             arg.device, arg.commandPool, arg.graphicsQueue,
             arg.stagingBuffer, arg.vertexBuffer, bufferSize
+        );
+        vkDestroyBuffer(arg.device, arg.stagingBuffer, null);
+        vkFreeMemory(arg.device, arg.stagingBufferMemory, null);
+        return ok(forward!arg.erase!("stagingBuffer", "stagingBufferMemory"));
+    })
+    ;
+}
+
+auto ref createIndexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+
+    static auto localCreateIndexBuffer(Args...)(auto ref Args args)
+    {
+        return createBuffer!("indexBuffer", "indexBufferMemory")(forward!args);
+    }
+
+    immutable VkDeviceSize bufferSize = indices.sizeof;
+
+    return forward!arg.createBuffer!("stagingBuffer", "stagingBufferMemory")(
+        bufferSize,
+        // Possible to specify multiple purposes using a bitwase or.
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // Host (CPU) can see the memory.
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // Data can be immediatly written to the memory by host.
+    )
+    .andThen!((auto ref arg)
+    {
+        import core.stdc.string : memcpy;
+
+        void* data;
+        vkMapMemory(arg.device, arg.stagingBufferMemory,
+            0, // Offset.
+            bufferSize, // Size (or VK_WHOLE_SIZE).
+            0, // Flags, not used in current API.
+            &data
+        );
+        memcpy(data, indices.ptr, indices.sizeof);
+        vkUnmapMemory(arg.device, arg.stagingBufferMemory);
+        
+        return ok(forward!arg);
+    })
+    .andThen!localCreateIndexBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    )
+    .andThen!((auto ref arg)
+    {
+        copyBuffer(
+            arg.device, arg.commandPool, arg.graphicsQueue,
+            arg.stagingBuffer, arg.indexBuffer, bufferSize
         );
         vkDestroyBuffer(arg.device, arg.stagingBuffer, null);
         vkFreeMemory(arg.device, arg.stagingBufferMemory, null);
@@ -1999,6 +2058,8 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(typeof(arg.vertexBufferMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
+    && is(typeof(arg.indexBufferMemory) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.indexBuffer) : from!"erupted".VkBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.imageAvailableSemaphores[])) : from!"erupted".VkSemaphore)
     && is(from!"std.range".ElementType!(typeof(arg.renderFinishedSemaphores[])) : from!"erupted".VkSemaphore)
@@ -2023,8 +2084,10 @@ if(from!"std.typecons".isTuple!T
                 vkDestroySemaphore(arg.device, arg.imageAvailableSemaphores[i], null);
             }
 
-            vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
+            vkDestroyBuffer(arg.device, arg.indexBuffer, null);
+            vkFreeMemory(arg.device, arg.indexBufferMemory, null);
 
+            vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
             vkFreeMemory(arg.device, arg.vertexBufferMemory, null);
 
             vkDestroyCommandPool(arg.device, arg.commandPool, null);
@@ -2063,6 +2126,8 @@ if(from!"std.typecons".isTuple!T
                 "commandPool",
                 "vertexBufferMemory",
                 "vertexBuffer",
+                "indexBufferMemory",
+                "indexBuffer",
                 "imageAvailableSemaphores",
                 "renderFinishedSemaphores",
                 "inFlightFences",
