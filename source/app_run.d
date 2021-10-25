@@ -85,7 +85,7 @@ immutable Vertex[4] vertices = ()
         { vec2f(-0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
         { vec2f( 0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f) },
         { vec2f( 0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f) },
-        { vec2f(-0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f) },
+        { vec2f(-0.5f,  0.5f), vec3f(1.0f, 1.0f, 1.0f) },
     ];
     return vertices;
 }();
@@ -1751,14 +1751,26 @@ if(from!"std.typecons".isTuple!T
             &res.vertexBuffer,
             offsets.ptr,
         );
+
+        // Type is UINT16 or UINT32.
+        vkCmdBindIndexBuffer(commandBuffer, res.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
         
-        vkCmdDraw(
+        // vkCmdDraw(
+        //     commandBuffer,
+        //     vertices.length, // vertexCount.
+        //     1, // instanceCount
+        //     0, // firstVertex - lowest value of gl_VertexIndex
+        //     0, // firstInstance - lowest value of gl_InstanceIndex
+        //     );
+
+        vkCmdDrawIndexed(
             commandBuffer,
-            vertices.length, // vertexCount.
+            indices.length, // vertexCount.
             1, // instanceCount
-            0, // firstVertex - lowest value of gl_VertexIndex
-            0, // firstInstance - lowest value of gl_InstanceIndex
-            );
+            0, // Offset into the index buffer in indices, not bytes.
+            0, // Offset to add to the indices in the index buffer.
+            0, // Offset for instancing.
+        );
         
         vkCmdEndRenderPass(commandBuffer);
 
