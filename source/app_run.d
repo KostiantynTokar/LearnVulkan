@@ -1347,36 +1347,34 @@ if(from!"std.typecons".isTuple!T
 
 auto findMemoryType(T)(
     auto ref T arg,
-    in from!"erupted".VkMemoryPropertyFlags properties
-    ) nothrow @nogc @trusted
+    in from!"erupted".VkMemoryRequirements memRequirements,
+    in from!"erupted".VkMemoryPropertyFlags properties,
+    out uint chosenMemoryTypeIndex,
+) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
-    && is(typeof(arg.memRequirements) : from!"erupted".VkMemoryRequirements)
 )
 {
     import util;
     import erupted;
     import expected : ok, err;
-
-    alias Res = TupleCat!(T, Tuple!(uint, "chosenMemoryTypeIndex"));
-    auto res = partialConstruct!Res(forward!arg);
     
     VkPhysicalDeviceMemoryProperties memProperties;
-    vkGetPhysicalDeviceMemoryProperties(res.physicalDevice, &memProperties);
+    vkGetPhysicalDeviceMemoryProperties(arg.physicalDevice, &memProperties);
 
     foreach(i; 0 .. memProperties.memoryTypeCount)
     {
-        if((res.memRequirements.memoryTypeBits & (1 << i)) // Check memory type.
+        if((memRequirements.memoryTypeBits & (1 << i)) // Check memory type.
             // Check the heap and its memory types properties.
             && (memProperties.memoryTypes[i].propertyFlags & properties) == properties
         )
         {
-            res.chosenMemoryTypeIndex = i;
-            return ok(res.move);
+            chosenMemoryTypeIndex = i;
+            return ok(forward!arg);
         }
     }
 
-    return err!Res("Falied to find suitable memory type.");
+    return err!T("Falied to find suitable memory type.");
 }
 
 auto createBuffer(string bufferName, string deviceMemoryName, T)(
@@ -1394,11 +1392,13 @@ if(from!"std.typecons".isTuple!T
     import erupted;
     import expected : ok, err, andThen;
 
+    VkMemoryRequirements memRequirements;
+    uint chosenMemoryTypeIndex;
+
     return (auto ref arg)
     {
         alias Res = TupleCat!(T, Tuple!(
             VkBuffer, bufferName,
-            VkMemoryRequirements, "memRequirements",
         ));
         auto res = partialConstruct!Res(forward!arg);
 
@@ -1418,26 +1418,24 @@ if(from!"std.typecons".isTuple!T
             return err!Res("Failed to create vertex buffer.");
         }
 
-        vkGetBufferMemoryRequirements(res.device, __traits(getMember, res, bufferName), &res.memRequirements);
+        vkGetBufferMemoryRequirements(res.device, __traits(getMember, res, bufferName), &memRequirements);
 
         return ok(res.move);
     }(forward!arg)
-    .andThen!findMemoryType(properties)
+    .andThen!findMemoryType(memRequirements, properties, chosenMemoryTypeIndex)
     .andThen!((auto ref arg)
     {
         import core.stdc.string : memcpy;
         
-        alias TempRes = TupleCat!(typeof(arg), Tuple!(
+        alias Res = TupleCat!(typeof(arg), Tuple!(
             VkDeviceMemory, deviceMemoryName,
         ));
-        alias toErase = AliasSeq!("memRequirements", "chosenMemoryTypeIndex");
-        alias Res = TupleErase!(TempRes, toErase);
-        auto res = partialConstruct!TempRes(forward!arg);
+        auto res = partialConstruct!Res(forward!arg);
 
         const VkMemoryAllocateInfo allocInfo =
         {
-            allocationSize : res.memRequirements.size,
-            memoryTypeIndex : res.chosenMemoryTypeIndex,
+            allocationSize : memRequirements.size,
+            memoryTypeIndex : chosenMemoryTypeIndex,
         };
 
         if(vkAllocateMemory(
@@ -1449,7 +1447,7 @@ if(from!"std.typecons".isTuple!T
         // Device, vertex buffer, device memory and offset within the device memory.
         vkBindBufferMemory(res.device, __traits(getMember, res, bufferName), __traits(getMember, res, deviceMemoryName), 0);
         
-        return ok(res.move.erase!toErase);
+        return ok(res.move);
     })
     ;
 }
