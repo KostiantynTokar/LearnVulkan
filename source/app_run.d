@@ -91,6 +91,15 @@ immutable Vertex[4] vertices = ()
 }();
 immutable ushort[6] indices = [ 0, 1, 2, 2, 3, 0];
 
+struct UniformBufferObject
+{
+    import gfm.math : mat4f;
+
+    align(16) mat4f model;
+    align(16) mat4f view;
+    align(16) mat4f proj;
+}
+
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T)
 {
@@ -140,6 +149,7 @@ if(from!"std.typecons".isTuple!T)
         .andThen!createLogicalDevice
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
         .andThen!getDeviceQueues
+        .andThen!createDescriptorSetLayout
         .andThen!createSwapChainAndRelatedObjects
         .andThen!createCommandPool
         .andThen!createVertexBuffer
@@ -805,6 +815,9 @@ if(from!"std.typecons".isTuple!T
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
         .andThen!createFramebuffers
+        .andThen!createUniformBuffers
+        .andThen!createDescriptorPool
+        .andThen!createDescriptorSets
         ;
 }
 
@@ -1081,11 +1094,52 @@ auto ref createShaderModule(from!"erupted".VkDevice device, immutable(char)* com
     return createShaderModule(device, shaderCode);
 }
 
+auto ref createDescriptorSetLayout(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkDescriptorSetLayout, "descriptorSetLayout",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const VkDescriptorSetLayoutBinding uboLayoutBinding =
+    {
+        // Binding used in the shader.
+        binding : 0,
+        descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        // More then 1 to specify an array of UBOs.
+        descriptorCount : 1,
+        // Specify from which shader this binding is referenced. Can be OR'ed or VK_SHADER_STAGE_ALL_GRAPHICS.
+        stageFlags : VK_SHADER_STAGE_VERTEX_BIT,
+        pImmutableSamplers : null, // Optional
+    };
+
+    const VkDescriptorSetLayoutCreateInfo layoutInfo =
+    {
+        bindingCount : 1,
+        pBindings : &uboLayoutBinding,
+    };
+
+    if(vkCreateDescriptorSetLayout(res.device, &layoutInfo, null, &res.descriptorSetLayout) != VK_SUCCESS)
+    {
+        return err!Res("Failed to create descriptor set layout.");
+    }
+
+    return ok(res.move);
+}
+
 auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+    && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
 )
 {
     import util;
@@ -1173,7 +1227,7 @@ if(from!"std.typecons".isTuple!T
                         // 1 pixel wide. Thicker requires wideLines GPU feature.
                         lineWidth : 1.0f,
                         cullMode : VK_CULL_MODE_BACK_BIT,
-                        frontFace : VK_FRONT_FACE_CLOCKWISE,
+                        frontFace : VK_FRONT_FACE_COUNTER_CLOCKWISE,
 
                         // Modify fragment's depth depending on its slope.
                         depthBiasEnable : VK_FALSE,
@@ -1239,8 +1293,8 @@ if(from!"std.typecons".isTuple!T
                     // Uniform variables and push constants
                     const VkPipelineLayoutCreateInfo pipelineLayoutInfo =
                     {
-                        setLayoutCount : 0, // Optional
-                        pSetLayouts : null, // Optional
+                        setLayoutCount : 1,
+                        pSetLayouts : &res.descriptorSetLayout,
                         pushConstantRangeCount : 0, // Optional
                         pPushConstantRanges : null, // Optional
                     };
@@ -1635,6 +1689,162 @@ if(from!"std.typecons".isTuple!T
     ;
 }
 
+auto ref createUniformBuffers(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+)
+{
+    import util;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import erupted;
+    import expected : ok, andThen;
+    import automem : Vector;
+    
+    immutable VkDeviceSize bufferSize = UniformBufferObject.sizeof;
+
+    Vector!(VkBuffer, Mallocator) uniformBuffers;
+    Vector!(VkDeviceMemory, Mallocator) uniformBuffersMemory;
+
+    uniformBuffers.length = arg.swapChainImages.length;
+    uniformBuffersMemory.length = arg.swapChainImages.length;
+
+    auto exp = ok(forward!arg);
+    foreach(i; 0 ..  uniformBuffers.length)
+    {
+        exp = exp.andThen!createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            uniformBuffers.ptr[i],
+            uniformBuffersMemory.ptr[i],
+        );
+    }
+
+    return exp
+    .andThen!((auto ref arg)
+    {
+        alias Res = TupleCat!(T, Tuple!(
+            Vector!(VkBuffer, Mallocator), "uniformBuffers",
+            Vector!(VkDeviceMemory, Mallocator), "uniformBuffersMemory",
+        ));
+        auto res = partialConstruct!Res(forward!arg);
+        res.uniformBuffers = uniformBuffers.move;
+        res.uniformBuffersMemory = uniformBuffersMemory.move;
+        return ok(res.move);
+    })
+    ;
+}
+
+auto createDescriptorPool(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkDescriptorPool, "descriptorPool",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const VkDescriptorPoolSize poolSize =
+    {
+        type : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        descriptorCount : cast(uint) res.swapChainImages.length,
+    };
+
+    const VkDescriptorPoolCreateInfo poolInfo =
+    {
+        poolSizeCount : 1,
+        pPoolSizes : &poolSize,
+        // Maximum number of descriptor sets that can be allocated.
+        maxSets : cast(uint) res.swapChainImages.length,
+        flags : 0
+            // If individual descriptor sets can be freed.
+            // | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT
+    };
+    
+    return vkCreateDescriptorPool(res.device, &poolInfo, null, &res.descriptorPool) == VK_SUCCESS
+        ? ok(res.move)
+        : err!Res("Failed to create descriptor pool");
+}
+
+auto createDescriptorSets(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
+    && is(typeof(arg.descriptorPool) : from!"erupted".VkDescriptorPool)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+    && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
+)
+{
+    import util;
+    import std.range : repeat;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import erupted;
+    import expected : ok, err;
+    import automem : Vector;
+
+    alias Res = TupleCat!(T, Tuple!(
+        Vector!(VkDescriptorSet, Mallocator), "descriptorSets",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const Vector!(VkDescriptorSetLayout, Mallocator) layouts = res.descriptorSetLayout.repeat(res.swapChainImages.length);
+
+    const VkDescriptorSetAllocateInfo allocInfo =
+    {
+        descriptorPool : res.descriptorPool,
+        descriptorSetCount : cast(uint) res.swapChainImages.length,
+        pSetLayouts : layouts.ptr,
+    };
+
+    res.descriptorSets.length = res.swapChainImages.length;
+    if(vkAllocateDescriptorSets(res.device, &allocInfo, res.descriptorSets.ptr) != VK_SUCCESS)
+    {
+        return err!Res("Failed to allocate descriptor sets.");
+    }
+
+    foreach(i; 0 .. res.swapChainImages.length)
+    {
+        const VkDescriptorBufferInfo bufferInfo =
+        {
+            buffer : res.uniformBuffers.ptr[i],
+            offset : 0,
+            // Range can be set to VK_WHOLE_SIZE.
+            range : UniformBufferObject.sizeof,
+        };
+
+        const VkWriteDescriptorSet descriptorWrite =
+        {
+            // What set and binding of the set to update.
+            dstSet : res.descriptorSets.ptr[i],
+            dstBinding : 0,
+            // Index of the first element, if descriptor is an array.
+            dstArrayElement : 0,
+            descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // Need to specify it again?!
+            descriptorCount : 1,
+            // For descriptors that refer to buffer data.
+            pBufferInfo : &bufferInfo,
+            // For descriptors that refer to image data.
+            pImageInfo : null, // Optional
+            // For descriptors that refer to buffer views.
+            pTexelBufferView : null, // Optional
+        };
+
+        vkUpdateDescriptorSets(res.device,
+            1, &descriptorWrite, // Array of VkWriteDescriptorSet.
+            0, null // Array of VkCopyDescriptorSet.
+        );
+    }
+
+    return ok(res.move);
+}
+
 auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -1673,6 +1883,7 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(from!"std.range".ElementType!(typeof(arg.descriptorSets[])) : from!"erupted".VkDescriptorSet)
     && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
 )
@@ -1768,6 +1979,18 @@ if(from!"std.typecons".isTuple!T
 
         // Type is UINT16 or UINT32.
         vkCmdBindIndexBuffer(commandBuffer, res.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            // Graphics or compute pipeline.
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            // Layout that the descriptor is based on.
+            res.pipelineLayout,
+            0, // Index of the first descriptor set.
+            1, // Number of sets to bind.
+            &res.descriptorSets.ptr[i], // Array of sets to bind.
+            0, null, // Array of offsets for dynamic descriptors.
+        );
         
         // vkCmdDraw(
         //     commandBuffer,
@@ -1866,6 +2089,37 @@ if(from!"std.typecons".isTuple!T
     return ok(res.move);
 }
 
+void updateUniformBuffer(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkExtent2D swapChainExtent,
+    from!"erupted".VkDeviceMemory uniformBufferMemory,
+) nothrow @nogc @trusted
+{
+    import core.stdc.string : memcpy;
+    import glfw_vulkan : glfwGetTime;
+    import erupted;
+    import gfm.math : vec3f, mat4f, radians;
+
+    immutable float time = glfwGetTime();
+
+    UniformBufferObject ubo =
+    {
+        model : mat4f.rotation(time * radians(90.0f), vec3f(0.0f, 0.0f, 1.0f)).transposed,
+        view : mat4f.lookAt(vec3f(2.0f, 2.0f, 2.0f), vec3f(0.0f, 0.0f, 0.0f), vec3f(0.0f, 0.0f, 1.0f)).transposed,
+        proj : mat4f.perspective(
+            radians(45.0f),
+            swapChainExtent.width / cast(float) swapChainExtent.height,
+            0.1f, 10.0f
+            ).transposed,
+    };
+    ubo.proj.c[1][1] *= -1; // Vulkan, unlike OpenGL, have Y coordinate upside down.
+
+    void* data;
+    vkMapMemory(device, uniformBufferMemory, 0, ubo.sizeof, 0, &data);
+    memcpy(data, &ubo, ubo.sizeof);
+    vkUnmapMemory(device, uniformBufferMemory);
+}
+
 from!"expected".Expected!T drawFrame(T)(auto ref T arg, immutable size_t currentFrame) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -1909,6 +2163,8 @@ if(from!"std.typecons".isTuple!T
     {
         return err!T("Failed to acquire swap chain image.");
     }
+
+    updateUniformBuffer(arg.device, arg.swapChainExtent, arg.uniformBuffersMemory.ptr[imageIndex]);
     
     if(arg.imagesInFlight.ptr[imageIndex] != VK_NULL_HANDLE)
     {
@@ -2025,6 +2281,10 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
+    && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
+    && is(from!"std.range".ElementType!(typeof(arg.uniformBuffersMemory[])) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.descriptorPool) : from!"erupted".VkDescriptorPool)
+    && is(from!"std.range".ElementType!(typeof(arg.descriptorSets[])) : from!"erupted".VkDescriptorSet)
 )
 {
     import util : erase;
@@ -2032,6 +2292,17 @@ if(from!"std.typecons".isTuple!T
     import std.meta : AliasSeq;
     import erupted;
     import expected : ok;
+
+    vkDestroyDescriptorPool(arg.device, arg.descriptorPool, null);
+
+    foreach(ref uniformBuffer; arg.uniformBuffers[])
+    {
+        vkDestroyBuffer(arg.device, uniformBuffer, null);
+    }
+    foreach(ref uniformBufferMemory; arg.uniformBuffersMemory[])
+    {
+        vkFreeMemory(arg.device, uniformBufferMemory, null);
+    }
 
     foreach(ref framebuffer; arg.swapChainFramebuffers[])
     {
@@ -2062,6 +2333,10 @@ if(from!"std.typecons".isTuple!T
         "pipelineLayout",
         "graphicsPipeline",
         "swapChainFramebuffers",
+        "uniformBuffers",
+        "uniformBuffersMemory",
+        "descriptorPool",
+        "descriptorSets",
         );
     return ok(forward!arg.erase!toErase);
 }
@@ -2075,6 +2350,7 @@ if(from!"std.typecons".isTuple!T
     && from!"util".implies(validationLayersEnabled,
         is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
     && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
     && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
@@ -2118,6 +2394,8 @@ if(from!"std.typecons".isTuple!T
 
             vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
+            vkDestroyDescriptorSetLayout(arg.device, arg.descriptorSetLayout, null);
+
             vkDestroyDevice(arg.device, null);
 
             debug(LearnVulkan_ValidationLayers)
@@ -2149,6 +2427,7 @@ if(from!"std.typecons".isTuple!T
                 "instance",
                 "surface",
                 "device",
+                "descriptorSetLayout",
                 "commandPool",
                 "vertexBufferMemory",
                 "vertexBuffer",
