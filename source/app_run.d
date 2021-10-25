@@ -815,6 +815,7 @@ if(from!"std.typecons".isTuple!T
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
         .andThen!createFramebuffers
+        .andThen!createUniformBuffers
         ;
 }
 
@@ -1686,6 +1687,53 @@ if(from!"std.typecons".isTuple!T
     ;
 }
 
+auto ref createUniformBuffers(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+)
+{
+    import util;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import erupted;
+    import expected : ok, andThen;
+    import automem : Vector;
+    
+    immutable VkDeviceSize bufferSize = UniformBufferObject.sizeof;
+
+    Vector!(VkBuffer, Mallocator) uniformBuffers;
+    Vector!(VkDeviceMemory, Mallocator) uniformBuffersMemory;
+
+    uniformBuffers.length = arg.swapChainImages.length;
+    uniformBuffersMemory.length = arg.swapChainImages.length;
+
+    auto exp = ok(forward!arg);
+    foreach(i; 0 ..  uniformBuffers.length)
+    {
+        exp = exp.andThen!createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            uniformBuffers.ptr[i],
+            uniformBuffersMemory.ptr[i],
+        );
+    }
+    
+    return exp
+    .andThen!((auto ref arg)
+    {
+        alias Res = TupleCat!(T, Tuple!(
+            Vector!(VkBuffer, Mallocator), "uniformBuffers",
+            Vector!(VkDeviceMemory, Mallocator), "uniformBuffersMemory",
+        ));
+        auto res = partialConstruct!Res(forward!arg);
+        res.uniformBuffers = uniformBuffers.move;
+        res.uniformBuffersMemory = uniformBuffersMemory.move;
+        return ok(res.move);
+    })
+    ;
+}
+
 auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -2076,6 +2124,8 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
+    && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
+    && is(from!"std.range".ElementType!(typeof(arg.uniformBuffersMemory[])) : from!"erupted".VkDeviceMemory)
 )
 {
     import util : erase;
@@ -2083,6 +2133,15 @@ if(from!"std.typecons".isTuple!T
     import std.meta : AliasSeq;
     import erupted;
     import expected : ok;
+
+    foreach(ref uniformBuffer; arg.uniformBuffers[])
+    {
+        vkDestroyBuffer(arg.device, uniformBuffer, null);
+    }
+    foreach(ref uniformBufferMemory; arg.uniformBuffersMemory[])
+    {
+        vkFreeMemory(arg.device, uniformBufferMemory, null);
+    }
 
     foreach(ref framebuffer; arg.swapChainFramebuffers[])
     {
@@ -2113,6 +2172,8 @@ if(from!"std.typecons".isTuple!T
         "pipelineLayout",
         "graphicsPipeline",
         "swapChainFramebuffers",
+        "uniformBuffers",
+        "uniformBuffersMemory",
         );
     return ok(forward!arg.erase!toErase);
 }
