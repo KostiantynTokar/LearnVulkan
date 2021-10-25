@@ -91,6 +91,15 @@ immutable Vertex[4] vertices = ()
 }();
 immutable ushort[6] indices = [ 0, 1, 2, 2, 3, 0];
 
+struct UniformBufferObject
+{
+    import gfm.math : mat4f;
+
+    mat4f model;
+    mat4f view;
+    mat4f proj;
+}
+
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T)
 {
@@ -140,6 +149,7 @@ if(from!"std.typecons".isTuple!T)
         .andThen!createLogicalDevice
         .andThen!((auto ref t) @trusted { loadDeviceLevelFunctions(t.device); return ok(forward!t); })
         .andThen!getDeviceQueues
+        .andThen!createDescriptorSetLayout
         .andThen!createSwapChainAndRelatedObjects
         .andThen!createCommandPool
         .andThen!createVertexBuffer
@@ -1081,11 +1091,52 @@ auto ref createShaderModule(from!"erupted".VkDevice device, immutable(char)* com
     return createShaderModule(device, shaderCode);
 }
 
+auto ref createDescriptorSetLayout(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkDescriptorSetLayout, "descriptorSetLayout",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const VkDescriptorSetLayoutBinding uboLayoutBinding =
+    {
+        // Binding used in the shader.
+        binding : 0,
+        descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        // More then 1 to specify an array of UBOs.
+        descriptorCount : 1,
+        // Specify from which shader this binding is referenced. Can be OR'ed or VK_SHADER_STAGE_ALL_GRAPHICS.
+        stageFlags : VK_SHADER_STAGE_VERTEX_BIT,
+        pImmutableSamplers : null, // Optional
+    };
+
+    const VkDescriptorSetLayoutCreateInfo layoutInfo =
+    {
+        bindingCount : 1,
+        pBindings : &uboLayoutBinding,
+    };
+
+    if(vkCreateDescriptorSetLayout(res.device, &layoutInfo, null, &res.descriptorSetLayout) != VK_SUCCESS)
+    {
+        return err!Res("Failed to create descriptor set layout.");
+    }
+
+    return ok(res.move);
+}
+
 auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
+    && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
 )
 {
     import util;
@@ -1239,8 +1290,8 @@ if(from!"std.typecons".isTuple!T
                     // Uniform variables and push constants
                     const VkPipelineLayoutCreateInfo pipelineLayoutInfo =
                     {
-                        setLayoutCount : 0, // Optional
-                        pSetLayouts : null, // Optional
+                        setLayoutCount : 1,
+                        pSetLayouts : &res.descriptorSetLayout,
                         pushConstantRangeCount : 0, // Optional
                         pPushConstantRanges : null, // Optional
                     };
@@ -2075,6 +2126,7 @@ if(from!"std.typecons".isTuple!T
     && from!"util".implies(validationLayersEnabled,
         is(typeof(arg.debugMessenger) : from!"erupted".VkDebugUtilsMessengerEXT))
     && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
     && is(typeof(arg.swapChain) : from!"erupted".VkSwapchainKHR)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
@@ -2118,6 +2170,8 @@ if(from!"std.typecons".isTuple!T
 
             vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
+            vkDestroyDescriptorSetLayout(arg.device, arg.descriptorSetLayout, null);
+
             vkDestroyDevice(arg.device, null);
 
             debug(LearnVulkan_ValidationLayers)
@@ -2149,6 +2203,7 @@ if(from!"std.typecons".isTuple!T
                 "instance",
                 "surface",
                 "device",
+                "descriptorSetLayout",
                 "commandPool",
                 "vertexBufferMemory",
                 "vertexBuffer",
