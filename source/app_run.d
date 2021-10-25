@@ -95,9 +95,9 @@ struct UniformBufferObject
 {
     import gfm.math : mat4f;
 
-    mat4f model;
-    mat4f view;
-    mat4f proj;
+    align(16) mat4f model;
+    align(16) mat4f view;
+    align(16) mat4f proj;
 }
 
 auto ref initWindow(T)(auto ref T arg) nothrow @nogc @trusted
@@ -1227,7 +1227,7 @@ if(from!"std.typecons".isTuple!T
                         // 1 pixel wide. Thicker requires wideLines GPU feature.
                         lineWidth : 1.0f,
                         cullMode : VK_CULL_MODE_BACK_BIT,
-                        frontFace : VK_FRONT_FACE_CLOCKWISE,
+                        frontFace : VK_FRONT_FACE_COUNTER_CLOCKWISE,
 
                         // Modify fragment's depth depending on its slope.
                         depthBiasEnable : VK_FALSE,
@@ -1794,7 +1794,7 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const Vector!(VkDescriptorSetLayout, Mallocator) layouts = arg.descriptorSetLayout.repeat(res.swapChainImages.length);
+    const Vector!(VkDescriptorSetLayout, Mallocator) layouts = res.descriptorSetLayout.repeat(res.swapChainImages.length);
 
     const VkDescriptorSetAllocateInfo allocInfo =
     {
@@ -1883,6 +1883,7 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(from!"std.range".ElementType!(typeof(arg.descriptorSets[])) : from!"erupted".VkDescriptorSet)
     && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
 )
@@ -1978,6 +1979,18 @@ if(from!"std.typecons".isTuple!T
 
         // Type is UINT16 or UINT32.
         vkCmdBindIndexBuffer(commandBuffer, res.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            // Graphics or compute pipeline.
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            // Layout that the descriptor is based on.
+            res.pipelineLayout,
+            0, // Index of the first descriptor set.
+            1, // Number of sets to bind.
+            &res.descriptorSets.ptr[i], // Array of sets to bind.
+            0, null, // Array of offsets for dynamic descriptors.
+        );
         
         // vkCmdDraw(
         //     commandBuffer,
@@ -2087,15 +2100,19 @@ void updateUniformBuffer(
     import erupted;
     import gfm.math : vec3f, mat4f, radians;
 
-    float time = glfwGetTime();
+    immutable float time = glfwGetTime();
 
     UniformBufferObject ubo =
     {
-        model : mat4f.rotation(time * radians(90.0f), vec3f(0.0f, 0.0f, 1.0f)),
-        view : mat4f.lookAt(vec3f(2.0f, 2.0f, 2.0f), vec3f(0.0f, 0.0f, 0.0f), vec3f(0.0f, 0.0f, 1.0f)),
-        proj : mat4f.perspective(radians(45.0f), swapChainExtent.width / cast(float) swapChainExtent.height, 0.1f, 10.0f),
+        model : mat4f.rotation(time * radians(90.0f), vec3f(0.0f, 0.0f, 1.0f)).transposed,
+        view : mat4f.lookAt(vec3f(2.0f, 2.0f, 2.0f), vec3f(0.0f, 0.0f, 0.0f), vec3f(0.0f, 0.0f, 1.0f)).transposed,
+        proj : mat4f.perspective(
+            radians(45.0f),
+            swapChainExtent.width / cast(float) swapChainExtent.height,
+            0.1f, 10.0f
+            ).transposed,
     };
-    ubo.proj.row(1)[1] *= -1; // Vulkan, unlike OpenGL, have Y coordinate upside down.
+    ubo.proj.c[1][1] *= -1; // Vulkan, unlike OpenGL, have Y coordinate upside down.
 
     void* data;
     vkMapMemory(device, uniformBufferMemory, 0, ubo.sizeof, 0, &data);
@@ -2146,6 +2163,8 @@ if(from!"std.typecons".isTuple!T
     {
         return err!T("Failed to acquire swap chain image.");
     }
+
+    updateUniformBuffer(arg.device, arg.swapChainExtent, arg.uniformBuffersMemory.ptr[imageIndex]);
     
     if(arg.imagesInFlight.ptr[imageIndex] != VK_NULL_HANDLE)
     {
@@ -2156,8 +2175,6 @@ if(from!"std.typecons".isTuple!T
     }
 
     arg.imagesInFlight.ptr[imageIndex] = arg.inFlightFences[currentFrame];
-
-    updateUniformBuffer(arg.device, arg.swapChainExtent, arg.uniformBuffersMemory.ptr[imageIndex]);
     
     const VkPipelineStageFlags[1] waitStages =
     [
@@ -2267,6 +2284,7 @@ if(from!"std.typecons".isTuple!T
     && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
     && is(from!"std.range".ElementType!(typeof(arg.uniformBuffersMemory[])) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.descriptorPool) : from!"erupted".VkDescriptorPool)
+    && is(from!"std.range".ElementType!(typeof(arg.descriptorSets[])) : from!"erupted".VkDescriptorSet)
 )
 {
     import util : erase;
