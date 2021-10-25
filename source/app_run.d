@@ -817,6 +817,7 @@ if(from!"std.typecons".isTuple!T
         .andThen!createFramebuffers
         .andThen!createUniformBuffers
         .andThen!createDescriptorPool
+        .andThen!createDescriptorSets
         ;
 }
 
@@ -1763,13 +1764,85 @@ if(from!"std.typecons".isTuple!T
         // Maximum number of descriptor sets that can be allocated.
         maxSets : cast(uint) res.swapChainImages.length,
         flags : 0
-            // If individual descriptor sets can be free.
+            // If individual descriptor sets can be freed.
             // | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT
     };
     
     return vkCreateDescriptorPool(res.device, &poolInfo, null, &res.descriptorPool) == VK_SUCCESS
         ? ok(res.move)
         : err!Res("Failed to create descriptor pool");
+}
+
+auto createDescriptorSets(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
+    && is(typeof(arg.descriptorPool) : from!"erupted".VkDescriptorPool)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+    && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
+)
+{
+    import util;
+    import std.range : repeat;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import erupted;
+    import expected : ok, err;
+    import automem : Vector;
+
+    alias Res = TupleCat!(T, Tuple!(
+        Vector!(VkDescriptorSet, Mallocator), "descriptorSets",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const Vector!(VkDescriptorSetLayout, Mallocator) layouts = arg.descriptorSetLayout.repeat(res.swapChainImages.length);
+
+    const VkDescriptorSetAllocateInfo allocInfo =
+    {
+        descriptorPool : res.descriptorPool,
+        descriptorSetCount : cast(uint) res.swapChainImages.length,
+        pSetLayouts : layouts.ptr,
+    };
+
+    res.descriptorSets.length = res.swapChainImages.length;
+    if(vkAllocateDescriptorSets(res.device, &allocInfo, res.descriptorSets.ptr) != VK_SUCCESS)
+    {
+        return err!Res("Failed to allocate descriptor sets.");
+    }
+
+    foreach(i; 0 .. res.swapChainImages.length)
+    {
+        const VkDescriptorBufferInfo bufferInfo =
+        {
+            buffer : res.uniformBuffers.ptr[i],
+            offset : 0,
+            // Range can be set to VK_WHOLE_SIZE.
+            range : UniformBufferObject.sizeof,
+        };
+
+        const VkWriteDescriptorSet descriptorWrite =
+        {
+            // What set and binding of the set to update.
+            dstSet : res.descriptorSets.ptr[i],
+            dstBinding : 0,
+            // Index of the first element, if descriptor is an array.
+            dstArrayElement : 0,
+            descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // Need to specify it again?!
+            descriptorCount : 1,
+            // For descriptors that refer to buffer data.
+            pBufferInfo : &bufferInfo,
+            // For descriptors that refer to image data.
+            pImageInfo : null, // Optional
+            // For descriptors that refer to buffer views.
+            pTexelBufferView : null, // Optional
+        };
+
+        vkUpdateDescriptorSets(res.device,
+            1, &descriptorWrite, // Array of VkWriteDescriptorSet.
+            0, null // Array of VkCopyDescriptorSet.
+        );
+    }
+
+    return ok(res.move);
 }
 
 auto ref createCommandPool(T)(auto ref T arg) nothrow @nogc @trusted
@@ -2245,6 +2318,7 @@ if(from!"std.typecons".isTuple!T
         "uniformBuffers",
         "uniformBuffersMemory",
         "descriptorPool",
+        "descriptorSets",
         );
     return ok(forward!arg.erase!toErase);
 }
