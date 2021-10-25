@@ -1718,7 +1718,7 @@ if(from!"std.typecons".isTuple!T
             uniformBuffersMemory.ptr[i],
         );
     }
-    
+
     return exp
     .andThen!((auto ref arg)
     {
@@ -1965,6 +1965,33 @@ if(from!"std.typecons".isTuple!T
     return ok(res.move);
 }
 
+void updateUniformBuffer(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkExtent2D swapChainExtent,
+    from!"erupted".VkDeviceMemory uniformBufferMemory,
+) nothrow @nogc @trusted
+{
+    import core.stdc.string : memcpy;
+    import glfw_vulkan : glfwGetTime;
+    import erupted;
+    import gfm.math : vec3f, mat4f, radians;
+
+    float time = glfwGetTime();
+
+    UniformBufferObject ubo =
+    {
+        model : mat4f.rotation(time * radians(90.0f), vec3f(0.0f, 0.0f, 1.0f)),
+        view : mat4f.lookAt(vec3f(2.0f, 2.0f, 2.0f), vec3f(0.0f, 0.0f, 0.0f), vec3f(0.0f, 0.0f, 1.0f)),
+        proj : mat4f.perspective(radians(45.0f), swapChainExtent.width / cast(float) swapChainExtent.height, 0.1f, 10.0f),
+    };
+    ubo.proj.row(1)[1] *= -1; // Vulkan, unlike OpenGL, have Y coordinate upside down.
+
+    void* data;
+    vkMapMemory(device, uniformBufferMemory, 0, ubo.sizeof, 0, &data);
+    memcpy(data, &ubo, ubo.sizeof);
+    vkUnmapMemory(device, uniformBufferMemory);
+}
+
 from!"expected".Expected!T drawFrame(T)(auto ref T arg, immutable size_t currentFrame) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -2018,6 +2045,8 @@ if(from!"std.typecons".isTuple!T
     }
 
     arg.imagesInFlight.ptr[imageIndex] = arg.inFlightFences[currentFrame];
+
+    updateUniformBuffer(arg.device, arg.swapChainExtent, arg.uniformBuffersMemory.ptr[imageIndex]);
     
     const VkPipelineStageFlags[1] waitStages =
     [
