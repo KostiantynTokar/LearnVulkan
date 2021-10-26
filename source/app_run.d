@@ -1585,7 +1585,7 @@ if(from!"std.typecons".isTuple!T
 
     return (auto ref arg)
     {
-        image = read_image("textures/texture.jpg", 4);
+        image = read_image("source/textures/texture.jpg", 4);
         if(image.e)
         {
             return err!T("Failed to load texture image.");
