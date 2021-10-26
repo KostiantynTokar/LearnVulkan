@@ -151,6 +151,7 @@ if(from!"std.typecons".isTuple!T)
         .andThen!getDeviceQueues
         .andThen!createDescriptorSetLayout
         .andThen!createCommandPool
+        .andThen!createTextureImage
         .andThen!createVertexBuffer
         .andThen!createIndexBuffer
         .andThen!createSwapChainAndRelatedObjects
@@ -1450,7 +1451,7 @@ if(from!"std.typecons".isTuple!T
 
         if(vkCreateBuffer(arg.device, &bufferInfo, null, &buffer) != VK_SUCCESS)
         {
-            return err!T("Failed to create vertex buffer.");
+            return err!T("Failed to create buffer.");
         }
 
         vkGetBufferMemoryRequirements(arg.device, buffer, &memRequirements);
@@ -1468,8 +1469,7 @@ if(from!"std.typecons".isTuple!T
             memoryTypeIndex : chosenMemoryTypeIndex,
         };
 
-        if(vkAllocateMemory(
-            arg.device, &allocInfo, null, &bufferMemory) != VK_SUCCESS)
+        if(vkAllocateMemory(arg.device, &allocInfo, null, &bufferMemory) != VK_SUCCESS)
         {
             return err!T("Failed to allocate buffer memory.");
         }
@@ -1478,6 +1478,159 @@ if(from!"std.typecons".isTuple!T
         vkBindBufferMemory(arg.device, buffer, bufferMemory, 0);
         
         return ok(forward!arg);
+    })
+    ;
+}
+
+auto createImage(T)(
+    auto ref T arg,
+    in uint width, in uint height,
+    in from!"erupted".VkFormat format,
+    in from!"erupted".VkImageTiling tiling,
+    in from!"erupted".VkImageUsageFlags usage,
+    in from!"erupted".VkMemoryPropertyFlags properties,
+    out from!"erupted".VkImage image,
+    out from!"erupted".VkDeviceMemory imageMemory,
+) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+
+    VkMemoryRequirements memRequirements;
+    uint chosenMemoryTypeIndex;
+
+    return (auto ref arg)
+    {
+        const VkImageCreateInfo imageInfo =
+        {
+            imageType : VK_IMAGE_TYPE_2D,
+            extent :
+            {
+                width : width,
+                height : height,
+                depth : 1,
+            },
+            mipLevels : 1,
+            arrayLayers : 1,
+            // I.e., VK_FORMAT_R8G8B8A8_SRGB.
+            format : format,
+            // Linear tiling - texels laid out in a row-major order (for direct access).
+            // Optimal tiling - implementation defined order.
+            tiling : tiling,
+            // Undefined - first transition will discard the textels.
+            // Preinitialized - first transition will preserve texels.
+            initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
+            usage : usage,
+            // Image will be used by one queue family.
+            sharingMode : VK_SHARING_MODE_EXCLUSIVE,
+            // Multisampling relevant for attachment images.
+            samples : VK_SAMPLE_COUNT_1_BIT,
+            // Flags can specify that image is sparce.
+            flags : 0,
+        };
+
+        if(vkCreateImage(arg.device, &imageInfo, null, &image) != VK_SUCCESS)
+        {
+            return err!T("Failed to create image.");
+        }
+
+        vkGetImageMemoryRequirements(arg.device, image, &memRequirements);
+        
+        return ok(forward!arg);
+    }(forward!arg)
+    .andThen!findMemoryType(memRequirements, properties, chosenMemoryTypeIndex)
+    .andThen!((auto ref arg)
+    {
+        import core.stdc.string : memcpy;
+
+        const VkMemoryAllocateInfo allocInfo =
+        {
+            allocationSize : memRequirements.size,
+            memoryTypeIndex : chosenMemoryTypeIndex,
+        };
+
+        if(vkAllocateMemory(arg.device, &allocInfo, null, &imageMemory) != VK_SUCCESS)
+        {
+            return err!T("Failed to allocate image memory.");
+        }
+
+        // Device, vertex buffer, device memory and offset within the device memory.
+        vkBindImageMemory(arg.device, image, imageMemory, 0);
+        
+        return ok(forward!arg);
+    })
+    ;
+}
+
+auto createTextureImage(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+    import imagefmt : IFImage, read_image;
+
+    IFImage image;
+    VkDeviceSize imageSize;
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    VkImage textureImage;
+    VkDeviceMemory textureImageMemory;
+
+    return (auto ref arg)
+    {
+        image = read_image("textures/texture.jpg", 4);
+        if(image.e)
+        {
+            return err!T("Failed to load texture image.");
+        }
+        imageSize = image.w * image.h * image.c;
+        return ok(forward!arg);
+        // TODO: free image on error.
+    }(forward!arg)
+    .andThen!createBuffer(
+        imageSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingBufferMemory,
+    )
+    .andThen!((auto ref arg)
+    {
+        import core.stdc.string : memcpy;
+
+        void* data;
+        vkMapMemory(arg.device, stagingBufferMemory, 0, imageSize, 0, &data);
+        memcpy(data, image.buf8.ptr, imageSize);
+        vkUnmapMemory(arg.device, stagingBufferMemory);
+        image.free();
+        return ok(forward!arg);
+    })
+    .andThen!createImage(
+        image.w, image.h,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // Sampled - for usage in shaders.
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        textureImage,
+        textureImageMemory,
+    )
+    .andThen!((auto ref arg)
+    {
+        alias Res = TupleCat!(T, Tuple!(
+            VkImage, "textureImage",
+            VkDeviceMemory, "textureImageMemory",
+        ));
+        auto res = partialConstruct!Res(forward!arg);
+        res.textureImage = textureImage.move;
+        res.textureImageMemory = textureImageMemory.move;
+        return ok(res.move);
     })
     ;
 }
