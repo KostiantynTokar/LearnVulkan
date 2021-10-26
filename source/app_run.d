@@ -1635,13 +1635,9 @@ if(from!"std.typecons".isTuple!T
     ;
 }
 
-void copyBuffer(
+from!"erupted".VkCommandBuffer beginSingleTimeCommands(
     from!"erupted".VkDevice device,
     from!"erupted".VkCommandPool commandPool,
-    from!"erupted".VkQueue transferQueue,
-    from!"erupted".VkBuffer srcBuffer,
-    from!"erupted".VkBuffer dstBuffer,
-    from!"erupted".VkDeviceSize size,
 ) nothrow @nogc @trusted
 {
     import erupted;
@@ -1656,12 +1652,50 @@ void copyBuffer(
     VkCommandBuffer commandBuffer;
     vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
 
-    const VkCommandBufferBeginInfo beginInfo =
+    immutable VkCommandBufferBeginInfo beginInfo =
     {
         flags : VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
 
     vkBeginCommandBuffer(commandBuffer, &beginInfo); // TODO: check result?
+
+    return commandBuffer;
+}
+
+void endSingleTimeCommands(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkCommandBuffer commandBuffer,
+) nothrow @nogc @trusted
+{
+    import erupted;
+
+    vkEndCommandBuffer(commandBuffer); // TODO: check result?
+
+    const VkSubmitInfo submitInfo =
+    {
+        commandBufferCount : 1,
+        pCommandBuffers: &commandBuffer,
+    };
+
+    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(transferQueue);
+    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+}
+
+void copyBuffer(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkBuffer srcBuffer,
+    from!"erupted".VkBuffer dstBuffer,
+    from!"erupted".VkDeviceSize size,
+) nothrow @nogc @trusted
+{
+    import erupted;
+
+    auto commandBuffer = beginSingleTimeCommands(device, commandPool);
 
     VkBufferCopy copyRegion =
     {
@@ -1673,19 +1707,7 @@ void copyBuffer(
 
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
-    vkEndCommandBuffer(commandBuffer); // TODO: check result?
-
-    VkSubmitInfo submitInfo =
-    {
-        commandBufferCount : 1,
-        pCommandBuffers : &commandBuffer,
-    };
-
-    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    // For multiple copies at once it is better to use fences and wait all at once.
-    vkQueueWaitIdle(transferQueue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
 }
 
 auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
