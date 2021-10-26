@@ -1566,6 +1566,53 @@ if(from!"std.typecons".isTuple!T
     ;
 }
 
+void transitionImageLayout(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkImage image,
+    from!"erupted".VkFormat format,
+    from!"erupted".VkImageLayout oldLayout,
+    from!"erupted".VkImageLayout newLayout,
+) nothrow @nogc @trusted
+{
+    import erupted;
+
+    auto commandBuffer = beginSingleTimeCommands(device, commandPool);
+
+    const VkImageMemoryBarrier barrier =
+    {
+        oldLayout : oldLayout, // Possible to use VK_IMAGELAYOUT_UNDEFINED.
+        newLayout : newLayout,
+        // Specify queue indices for queue ownership transfer.
+        srcQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        image : image,
+        // Specify concrete image part to be affected (mip level and array indices for arrays of images).
+        subresourceRange :
+        {
+            aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+            baseMipLevel : 0,
+            levelCount : 0,
+            baseArrayLayer : 0,
+            layerCount : 1,
+        },
+        srcAccessMask : 0, // TODO:
+        dstAccessMask : 0, // TODO:
+    };
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        0, 0, // TODO: Specify pipeline stages before and after the barrier.
+        0, // 0 or VK_DEPENDENCY_BY_REGION_BIT. The latter turn the barrier into a per-region condition
+        0, null,
+        0, null,
+        1, &barrier,
+    );
+
+    endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+}
+
 auto createTextureImage(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
