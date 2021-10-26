@@ -16,7 +16,6 @@
 		"GLFW_33"
 	],
 	"dflags": [
-		"-preview=in",
 		"-preview=dip25",
 		"-preview=dip1000",
 		"-preview=dip1008"
