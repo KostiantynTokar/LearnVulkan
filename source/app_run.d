@@ -1613,6 +1613,57 @@ void transitionImageLayout(
     endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
 }
 
+void copyBufferToImage(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkBuffer buffer,
+    from!"erupted".VkImage image,
+    in uint width, in uint height,
+) nothrow @nogc @trusted
+{
+    import erupted;
+    
+    auto commandBuffer = beginSingleTimeCommands(device, commandPool);
+
+    const VkBufferImageCopy region =
+    {
+        bufferOffset : 0,
+        // 0 for bufferRowLength and bufferImageHeight means that pixels are tightly packed.
+        bufferRowLength : 0,
+        bufferImageHeight : 0,
+        imageSubresource :
+        {
+            aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+            mipLevel : 0,
+            baseArrayLayer : 0,
+            layerCount : 1,
+        },
+        imageOffset :
+        {
+            x : 0,
+            y : 0,
+            z : 0,
+        },
+        imageExtent :
+        {
+            width : width,
+            height : height,
+            depth : 1,
+        },
+    };
+
+    vkCmdCopyBufferToImage(
+        commandBuffer,
+        buffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // Assumes that the image is already optimal as destination.
+        1, &region, // Array of regions.
+    );
+
+    endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+}
+
 auto createTextureImage(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
