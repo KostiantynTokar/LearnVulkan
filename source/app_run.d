@@ -1676,6 +1676,8 @@ if(from!"std.typecons".isTuple!T
 
     IFImage image;
     VkDeviceSize imageSize;
+    uint textureWidth;
+    uint textureHeight;
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
     VkImage textureImage;
@@ -1688,6 +1690,8 @@ if(from!"std.typecons".isTuple!T
         {
             return err!T("Failed to load texture image.");
         }
+        textureWidth = image.w;
+        textureHeight = image.h;
         imageSize = image.w * image.h * image.c;
         return ok(forward!arg);
         // TODO: free image on error.
@@ -1728,6 +1732,30 @@ if(from!"std.typecons".isTuple!T
         auto res = partialConstruct!Res(forward!arg);
         res.textureImage = textureImage.move;
         res.textureImageMemory = textureImageMemory.move;
+
+        transitionImageLayout(
+            res.device, res.commandPool, res.graphicsQueue,
+            res.textureImage,
+            VK_FORMAT_R8G8B8A8_SRGB,
+            VK_IMAGE_LAYOUT_UNDEFINED, // Image was created with undefined layout.
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        );
+
+        copyBufferToImage(
+            res.device, res.commandPool, res.graphicsQueue,
+            stagingBuffer,
+            res.textureImage,
+            textureWidth, textureHeight,
+        );
+
+        transitionImageLayout(
+            res.device, res.commandPool, res.graphicsQueue,
+            res.textureImage,
+            VK_FORMAT_R8G8B8A8_SRGB,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        );
+        
         return ok(res.move);
     })
     ;
