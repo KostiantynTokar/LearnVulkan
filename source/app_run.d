@@ -1724,6 +1724,7 @@ if(from!"std.typecons".isTuple!T
         stagingBuffer,
         stagingBufferMemory,
     )
+    // TODO: free buffer on error.
     .andThen!((auto ref arg)
     {
         import core.stdc.string : memcpy;
@@ -1777,6 +1778,9 @@ if(from!"std.typecons".isTuple!T
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         );
+
+        vkDestroyBuffer(res.device, stagingBuffer, null);
+        vkFreeMemory(res.device, stagingBufferMemory, null);
         
         return ok(res.move);
     })
@@ -2666,6 +2670,8 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(typeof(arg.textureImageMemory) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.textureImage) : from!"erupted".VkImage)
     && is(typeof(arg.vertexBufferMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(typeof(arg.indexBufferMemory) : from!"erupted".VkDeviceMemory)
@@ -2699,6 +2705,9 @@ if(from!"std.typecons".isTuple!T
 
             vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
             vkFreeMemory(arg.device, arg.vertexBufferMemory, null);
+
+            vkDestroyImage(arg.device, arg.textureImage, null);
+            vkFreeMemory(arg.device, arg.textureImageMemory, null);
 
             vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
