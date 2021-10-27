@@ -1580,7 +1580,7 @@ void transitionImageLayout(
 
     auto commandBuffer = beginSingleTimeCommands(device, commandPool);
 
-    const VkImageMemoryBarrier barrier =
+    VkImageMemoryBarrier barrier =
     {
         oldLayout : oldLayout, // Possible to use VK_IMAGELAYOUT_UNDEFINED.
         newLayout : newLayout,
@@ -1593,17 +1593,38 @@ void transitionImageLayout(
         {
             aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
             baseMipLevel : 0,
-            levelCount : 0,
+            levelCount : 1,
             baseArrayLayer : 0,
             layerCount : 1,
         },
-        srcAccessMask : 0, // TODO:
-        dstAccessMask : 0, // TODO:
     };
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    if(oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+    {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    }
+    else if(oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+    else
+    {
+        assert(false, "Unsupported layout transition.");
+    }
 
     vkCmdPipelineBarrier(
         commandBuffer,
-        0, 0, // TODO: Specify pipeline stages before and after the barrier.
+        sourceStage,
+        destinationStage,
         0, // 0 or VK_DEPENDENCY_BY_REGION_BIT. The latter turn the barrier into a per-region condition
         0, null,
         0, null,
@@ -1733,6 +1754,7 @@ if(from!"std.typecons".isTuple!T
         res.textureImage = textureImage.move;
         res.textureImageMemory = textureImageMemory.move;
 
+        // TODO: create setupCommandBuffer and flushCommandBuffer functions instead of creating 3 independent command buffers.
         transitionImageLayout(
             res.device, res.commandPool, res.graphicsQueue,
             res.textureImage,
