@@ -39,6 +39,7 @@ struct Vertex
 
     vec2f pos;
     vec3f color;
+    vec2f texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription() nothrow @nogc @trusted
     {
@@ -54,9 +55,9 @@ struct Vertex
         return bindingDescription;
     }
 
-    static VkVertexInputAttributeDescription[2] getAttributeDescriptions() nothrow @nogc @trusted
+    static VkVertexInputAttributeDescription[3] getAttributeDescriptions() nothrow @nogc @trusted
     {
-        const VkVertexInputAttributeDescription[2] attributeDescriptions =
+        const VkVertexInputAttributeDescription[3] attributeDescriptions =
         [
             {
                 // From which binding data comes.
@@ -73,6 +74,12 @@ struct Vertex
                 format : VK_FORMAT_R32G32B32_SFLOAT,
                 offset : Vertex.color.offsetof,
             },
+            {
+                binding : 0,
+                location : 2,
+                format : VK_FORMAT_R32G32_SFLOAT,
+                offset : Vertex.texCoord.offsetof,
+            },
         ];
         return attributeDescriptions;
     }
@@ -82,10 +89,10 @@ immutable Vertex[4] vertices = ()
 {
     import gfm.math : vec2f, vec3f;
     immutable Vertex[4] vertices = [
-        { vec2f(-0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
-        { vec2f( 0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f) },
-        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f) },
-        { vec2f(-0.5f,  0.5f), vec3f(1.0f, 1.0f, 1.0f) },
+        { vec2f(-0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) },
+        { vec2f( 0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) },
+        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) },
+        { vec2f(-0.5f,  0.5f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) },
     ];
     return vertices;
 }();
