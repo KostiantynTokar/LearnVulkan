@@ -1145,22 +1145,33 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const VkDescriptorSetLayoutBinding uboLayoutBinding =
-    {
-        // Binding used in the shader.
-        binding : 0,
-        descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        // More then 1 to specify an array of UBOs.
-        descriptorCount : 1,
-        // Specify from which shader this binding is referenced. Can be OR'ed or VK_SHADER_STAGE_ALL_GRAPHICS.
-        stageFlags : VK_SHADER_STAGE_VERTEX_BIT,
-        pImmutableSamplers : null, // Optional
-    };
+    const VkDescriptorSetLayoutBinding[2] bindings =
+    [
+        // uboLayoutBinding
+        {
+            // Binding used in the shader.
+            binding : 0,
+            descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            // More then 1 to specify an array of UBOs.
+            descriptorCount : 1,
+            // Specify from which shader this binding is referenced. Can be OR'ed or VK_SHADER_STAGE_ALL_GRAPHICS.
+            stageFlags : VK_SHADER_STAGE_VERTEX_BIT,
+            pImmutableSamplers : null, // Optional
+        },
+        // samplerLayoutBinding
+        {
+            binding : 1,
+            descriptorType : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount : 1,
+            stageFlags : VK_SHADER_STAGE_FRAGMENT_BIT,
+            pImmutableSamplers : null,
+        },
+    ];
 
     const VkDescriptorSetLayoutCreateInfo layoutInfo =
     {
-        bindingCount : 1,
-        pBindings : &uboLayoutBinding,
+        bindingCount : bindings.length,
+        pBindings : bindings.ptr,
     };
 
     if(vkCreateDescriptorSetLayout(res.device, &layoutInfo, null, &res.descriptorSetLayout) != VK_SUCCESS)
@@ -2191,16 +2202,22 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const VkDescriptorPoolSize poolSize =
-    {
-        type : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        descriptorCount : cast(uint) res.swapChainImages.length,
-    };
+    const VkDescriptorPoolSize[2] poolSizes =
+    [
+        {
+            type : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount : cast(uint) res.swapChainImages.length,
+        },
+        {
+            type : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount : cast(uint) res.swapChainImages.length,
+        }
+    ];
 
     const VkDescriptorPoolCreateInfo poolInfo =
     {
-        poolSizeCount : 1,
-        pPoolSizes : &poolSize,
+        poolSizeCount : poolSizes.length,
+        pPoolSizes : poolSizes.ptr,
         // Maximum number of descriptor sets that can be allocated.
         maxSets : cast(uint) res.swapChainImages.length,
         flags : 0
@@ -2218,6 +2235,8 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
     && is(typeof(arg.descriptorPool) : from!"erupted".VkDescriptorPool)
+    && is(typeof(arg.textureImageView) : from!"erupted".VkImageView)
+    && is(typeof(arg.textureSampler) : from!"erupted".VkSampler)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
     && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
 )
@@ -2259,25 +2278,42 @@ if(from!"std.typecons".isTuple!T
             range : UniformBufferObject.sizeof,
         };
 
-        const VkWriteDescriptorSet descriptorWrite =
+        const VkDescriptorImageInfo imageInfo =
         {
-            // What set and binding of the set to update.
-            dstSet : res.descriptorSets.ptr[i],
-            dstBinding : 0,
-            // Index of the first element, if descriptor is an array.
-            dstArrayElement : 0,
-            descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // Need to specify it again?!
-            descriptorCount : 1,
-            // For descriptors that refer to buffer data.
-            pBufferInfo : &bufferInfo,
-            // For descriptors that refer to image data.
-            pImageInfo : null, // Optional
-            // For descriptors that refer to buffer views.
-            pTexelBufferView : null, // Optional
+            imageLayout : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            imageView : res.textureImageView,
+            sampler : res.textureSampler,
         };
 
+        const VkWriteDescriptorSet[2] descriptorWrites =
+        [
+            {
+                // What set and binding of the set to update.
+                dstSet : res.descriptorSets.ptr[i],
+                dstBinding : 0,
+                // Index of the first element, if descriptor is an array.
+                dstArrayElement : 0,
+                descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // Need to specify it again?!
+                descriptorCount : 1,
+                // For descriptors that refer to buffer data.
+                pBufferInfo : &bufferInfo,
+                // For descriptors that refer to image data.
+                pImageInfo : null, // Optional
+                // For descriptors that refer to buffer views.
+                pTexelBufferView : null, // Optional
+            },
+            {
+                dstSet : res.descriptorSets.ptr[i],
+                dstBinding : 1,
+                dstArrayElement : 0,
+                descriptorType : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                descriptorCount : 1,
+                pImageInfo : &imageInfo,
+            }
+        ];
+
         vkUpdateDescriptorSets(res.device,
-            1, &descriptorWrite, // Array of VkWriteDescriptorSet.
+            descriptorWrites.length, descriptorWrites.ptr, // Array of VkWriteDescriptorSet.
             0, null // Array of VkCopyDescriptorSet.
         );
     }
