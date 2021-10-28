@@ -1832,45 +1832,28 @@ if(from!"std.typecons".isTuple!T
 auto createTextureImageView(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.textureImage) : from!"erupted".VkImage)
 )
 {
     import util;
     import erupted;
-    import expected : ok, err;
+    import expected : ok, err, mapOrElse;
 
     alias Res = TupleCat!(T, Tuple!(
         VkImageView, "textureImageView",
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const VkImageViewCreateInfo viewInfo =
-    {
-        image : res.textureImage,
-        viewType : VK_IMAGE_VIEW_TYPE_2D,
-        format : VK_FORMAT_R8G8B8A8_SRGB,
-        subresourceRange :
+    return createImageView(res.device, res.textureImage, VK_FORMAT_R8G8B8A8_SRGB)
+    .mapOrElse!(
+        (imageView)
         {
-            aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
-            baseMipLevel : 0,
-            levelCount : 1,
-            baseArrayLayer : 0,
-            layerCount : 1,
+            res.textureImageView = imageView;
+            return ok(res.move);
         },
-        components : // Optional - VK_COMPONENT_SWIZZLE_IDENTITY is defined as 0.
-        {
-            r : VK_COMPONENT_SWIZZLE_IDENTITY,
-            g : VK_COMPONENT_SWIZZLE_IDENTITY,
-            b : VK_COMPONENT_SWIZZLE_IDENTITY,
-            a : VK_COMPONENT_SWIZZLE_IDENTITY,
-        },
-    };
-
-    if(vkCreateImageView(res.device, &viewInfo, null, &res.textureImageView) != VK_SUCCESS)
-    {
-        return err!Res("Failed to create texture image view.");
-    }
-
-    return ok(res.move);
+        e => err!Res(e),
+    )
+    ;
 }
 
 from!"erupted".VkCommandBuffer beginSingleTimeCommands(
