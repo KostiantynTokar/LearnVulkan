@@ -796,7 +796,7 @@ if(from!"std.typecons".isTuple!T
 
     return createSwapChain(forward!arg)
         .andThen!getSwapChainImages
-        .andThen!createImageViews
+        .andThen!createSwapChainImageViews
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
         .andThen!createFramebuffers
@@ -908,34 +908,24 @@ if(from!"std.typecons".isTuple!T
     return ok(res.move);
 }
 
-auto ref createImageViews(T)(auto ref T arg) nothrow @nogc @trusted
-if(from!"std.typecons".isTuple!T
-    && is(typeof(arg.device) : from!"erupted".VkDevice)
-    && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
-    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+auto createImageViews(Range)(from!"erupted".VkDevice device, Range imagesAndFormats)
+if(from!"std.range".isInputRange!Range
+    && is(from!"std.range".ElementType!Range : from!"std.typecons".Tuple!(from!"erupted".VkImage, from!"erupted".VkFormat))
 )
 {
-    import util;
-    import std.range : enumerate;
-    import std.experimental.allocator.mallocator : Mallocator;
+    import std.range : zip, repeat;
+    import std.algorithm : map;
     import erupted;
     import expected : ok, err;
-    import automem : Vector;
 
-    alias VectorType = Vector!(VkImageView, Mallocator);
-    alias Res = TupleCat!(T, Tuple!(VectorType, "swapChainImageViews"));
-    auto res = partialConstruct!Res(forward!arg);
-
-    res.swapChainImageViews.length = res.swapChainImages.length;
-
-    foreach(i, ref image; res.swapChainImages[].enumerate)
+    return device.repeat.zip(imagesAndFormats).map!(
+    (auto ref elem)
     {
-        const VkImageViewCreateInfo createInfo =
+        const VkImageViewCreateInfo viewInfo =
         {
-            image : image,
+            image : elem[1][0],
             viewType : VK_IMAGE_VIEW_TYPE_2D,
-            format : res.swapChainImageFormat,
-
+            format : elem[1][1],
             components : 
             {
                 r : VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -943,7 +933,6 @@ if(from!"std.typecons".isTuple!T
                 b : VK_COMPONENT_SWIZZLE_IDENTITY,
                 a : VK_COMPONENT_SWIZZLE_IDENTITY,
             },
-
             subresourceRange :
             {
                 aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
@@ -955,18 +944,70 @@ if(from!"std.typecons".isTuple!T
             },
         };
 
-        if(vkCreateImageView(res.device, &createInfo, null, &res.swapChainImageViews.ptr[i])
-            != VK_SUCCESS)
-        {
-            foreach(ref imageView; res.swapChainImageViews.ptr[0 .. i])
-            {
-                vkDestroyImageView(res.device, imageView, null);
-            }
-            return err!Res("Failed to create image view.");
-        }
-    }
+        VkImageView imageView;
+        return vkCreateImageView(elem[0], &viewInfo, null, &imageView) == VK_SUCCESS
+            ? ok(imageView)
+            : err!VkImageView("Failed to create image view.");
+    })
+    ;
+}
 
-    return ok(res.move);
+auto createImageView(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkImage image,
+    from!"erupted".VkFormat format,
+)
+{
+    import std.typecons : tuple;
+    import std.range : only;
+    return createImageViews(device, only(tuple(image, format))).front;
+}
+
+auto ref createSwapChainImageViews(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+    && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
+)
+{
+    import util;
+    import std.range : enumerate, zip, repeat;
+    import std.algorithm : fold;
+    import std.experimental.allocator.mallocator : Mallocator;
+    import erupted;
+    import expected : ok, err, andThen, mapOrElse;
+    import automem : Vector;
+
+    alias VkImageViewArray = Vector!(VkImageView, Mallocator);
+    alias Res = TupleCat!(T, Tuple!(VkImageViewArray, "swapChainImageViews"));
+    auto res = partialConstruct!Res(forward!arg);
+
+    res.swapChainImageViews.length = res.swapChainImages.length;
+    
+    return createImageViews(
+        res.device,
+        zip(
+            res.swapChainImages[],
+            res.swapChainImageFormat.repeat(res.swapChainImages.length)
+        )
+    )
+    .enumerate
+    .fold!((accum, elem)
+    {
+        return accum.andThen!((auto ref arg)
+        {
+            return elem[1].mapOrElse!(
+                (imageView)
+                {
+                    arg.swapChainImageViews.ptr[elem[0]] = imageView;
+                    return ok(forward!arg);
+                },
+                e => err!Res(e)
+            );
+        })
+        ;
+    })(ok(res.move))
+    ;
 }
 
 auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
