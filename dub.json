@@ -1,6 +1,7 @@
 {
 	"name": "learn-vulkan",
 	"dependencies": {
+		"imagefmt": "~>2.1.2",
 		"automem": "~>0.6.7",
 		"gfm": "~>8.0.6",
 		"bindbc-glfw": "~>1.0.0",
@@ -15,7 +16,6 @@
 		"GLFW_33"
 	],
 	"dflags": [
-		"-preview=in",
 		"-preview=dip25",
 		"-preview=dip1000",
 		"-preview=dip1008"

@@ -39,6 +39,7 @@ struct Vertex
 
     vec2f pos;
     vec3f color;
+    vec2f texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription() nothrow @nogc @trusted
     {
@@ -54,9 +55,9 @@ struct Vertex
         return bindingDescription;
     }
 
-    static VkVertexInputAttributeDescription[2] getAttributeDescriptions() nothrow @nogc @trusted
+    static VkVertexInputAttributeDescription[3] getAttributeDescriptions() nothrow @nogc @trusted
     {
-        const VkVertexInputAttributeDescription[2] attributeDescriptions =
+        const VkVertexInputAttributeDescription[3] attributeDescriptions =
         [
             {
                 // From which binding data comes.
@@ -73,6 +74,12 @@ struct Vertex
                 format : VK_FORMAT_R32G32B32_SFLOAT,
                 offset : Vertex.color.offsetof,
             },
+            {
+                binding : 0,
+                location : 2,
+                format : VK_FORMAT_R32G32_SFLOAT,
+                offset : Vertex.texCoord.offsetof,
+            },
         ];
         return attributeDescriptions;
     }
@@ -82,10 +89,10 @@ immutable Vertex[4] vertices = ()
 {
     import gfm.math : vec2f, vec3f;
     immutable Vertex[4] vertices = [
-        { vec2f(-0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f) },
-        { vec2f( 0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f) },
-        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f) },
-        { vec2f(-0.5f,  0.5f), vec3f(1.0f, 1.0f, 1.0f) },
+        { vec2f(-0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) },
+        { vec2f( 0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) },
+        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) },
+        { vec2f(-0.5f,  0.5f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) },
     ];
     return vertices;
 }();
@@ -151,6 +158,9 @@ if(from!"std.typecons".isTuple!T)
         .andThen!getDeviceQueues
         .andThen!createDescriptorSetLayout
         .andThen!createCommandPool
+        .andThen!createTextureImage
+        .andThen!createTextureImageView
+        .andThen!createTextureSampler
         .andThen!createVertexBuffer
         .andThen!createIndexBuffer
         .andThen!createSwapChainAndRelatedObjects
@@ -659,6 +669,12 @@ if(from!"std.typecons".isTuple!T
         .map!((elem)
         {
             elem[1].physicalDevice = elem[0];
+            VkPhysicalDeviceFeatures supportedFeatures;
+            vkGetPhysicalDeviceFeatures(elem[1].physicalDevice, &supportedFeatures);
+            if(!supportedFeatures.samplerAnisotropy)
+            {
+                return err!Res("Failed to find suitable GPU.");
+            }
             if(!checkDeviceExtensionSupport(elem[1].physicalDevice))
             {
                 return err!Res("Failed to find suitable GPU.");
@@ -715,7 +731,10 @@ if(from!"std.typecons".isTuple!T
         ++uniqueFamiliesCount;
     }
 
-    const VkPhysicalDeviceFeatures deviceFeatures;
+    const VkPhysicalDeviceFeatures deviceFeatures =
+    {
+        samplerAnisotropy : VK_TRUE,
+    };
 
     VkDeviceCreateInfo createInfo =
     {
@@ -1133,22 +1152,33 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const VkDescriptorSetLayoutBinding uboLayoutBinding =
-    {
-        // Binding used in the shader.
-        binding : 0,
-        descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        // More then 1 to specify an array of UBOs.
-        descriptorCount : 1,
-        // Specify from which shader this binding is referenced. Can be OR'ed or VK_SHADER_STAGE_ALL_GRAPHICS.
-        stageFlags : VK_SHADER_STAGE_VERTEX_BIT,
-        pImmutableSamplers : null, // Optional
-    };
+    const VkDescriptorSetLayoutBinding[2] bindings =
+    [
+        // uboLayoutBinding
+        {
+            // Binding used in the shader.
+            binding : 0,
+            descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            // More then 1 to specify an array of UBOs.
+            descriptorCount : 1,
+            // Specify from which shader this binding is referenced. Can be OR'ed or VK_SHADER_STAGE_ALL_GRAPHICS.
+            stageFlags : VK_SHADER_STAGE_VERTEX_BIT,
+            pImmutableSamplers : null, // Optional
+        },
+        // samplerLayoutBinding
+        {
+            binding : 1,
+            descriptorType : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount : 1,
+            stageFlags : VK_SHADER_STAGE_FRAGMENT_BIT,
+            pImmutableSamplers : null,
+        },
+    ];
 
     const VkDescriptorSetLayoutCreateInfo layoutInfo =
     {
-        bindingCount : 1,
-        pBindings : &uboLayoutBinding,
+        bindingCount : bindings.length,
+        pBindings : bindings.ptr,
     };
 
     if(vkCreateDescriptorSetLayout(res.device, &layoutInfo, null, &res.descriptorSetLayout) != VK_SUCCESS)
@@ -1491,7 +1521,7 @@ if(from!"std.typecons".isTuple!T
 
         if(vkCreateBuffer(arg.device, &bufferInfo, null, &buffer) != VK_SUCCESS)
         {
-            return err!T("Failed to create vertex buffer.");
+            return err!T("Failed to create buffer.");
         }
 
         vkGetBufferMemoryRequirements(arg.device, buffer, &memRequirements);
@@ -1509,8 +1539,7 @@ if(from!"std.typecons".isTuple!T
             memoryTypeIndex : chosenMemoryTypeIndex,
         };
 
-        if(vkAllocateMemory(
-            arg.device, &allocInfo, null, &bufferMemory) != VK_SUCCESS)
+        if(vkAllocateMemory(arg.device, &allocInfo, null, &bufferMemory) != VK_SUCCESS)
         {
             return err!T("Failed to allocate buffer memory.");
         }
@@ -1520,6 +1549,338 @@ if(from!"std.typecons".isTuple!T
         
         return ok(forward!arg);
     })
+    ;
+}
+
+auto createImage(T)(
+    auto ref T arg,
+    in uint width, in uint height,
+    in from!"erupted".VkFormat format,
+    in from!"erupted".VkImageTiling tiling,
+    in from!"erupted".VkImageUsageFlags usage,
+    in from!"erupted".VkMemoryPropertyFlags properties,
+    out from!"erupted".VkImage image,
+    out from!"erupted".VkDeviceMemory imageMemory,
+) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+
+    VkMemoryRequirements memRequirements;
+    uint chosenMemoryTypeIndex;
+
+    return (auto ref arg)
+    {
+        const VkImageCreateInfo imageInfo =
+        {
+            imageType : VK_IMAGE_TYPE_2D,
+            extent :
+            {
+                width : width,
+                height : height,
+                depth : 1,
+            },
+            mipLevels : 1,
+            arrayLayers : 1,
+            // I.e., VK_FORMAT_R8G8B8A8_SRGB.
+            format : format,
+            // Linear tiling - texels laid out in a row-major order (for direct access).
+            // Optimal tiling - implementation defined order.
+            tiling : tiling,
+            // Undefined - first transition will discard the textels.
+            // Preinitialized - first transition will preserve texels.
+            initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
+            usage : usage,
+            // Image will be used by one queue family.
+            sharingMode : VK_SHARING_MODE_EXCLUSIVE,
+            // Multisampling relevant for attachment images.
+            samples : VK_SAMPLE_COUNT_1_BIT,
+            // Flags can specify that image is sparce.
+            flags : 0,
+        };
+
+        if(vkCreateImage(arg.device, &imageInfo, null, &image) != VK_SUCCESS)
+        {
+            return err!T("Failed to create image.");
+        }
+
+        vkGetImageMemoryRequirements(arg.device, image, &memRequirements);
+        
+        return ok(forward!arg);
+    }(forward!arg)
+    .andThen!findMemoryType(memRequirements, properties, chosenMemoryTypeIndex)
+    .andThen!((auto ref arg)
+    {
+        import core.stdc.string : memcpy;
+
+        const VkMemoryAllocateInfo allocInfo =
+        {
+            allocationSize : memRequirements.size,
+            memoryTypeIndex : chosenMemoryTypeIndex,
+        };
+
+        if(vkAllocateMemory(arg.device, &allocInfo, null, &imageMemory) != VK_SUCCESS)
+        {
+            return err!T("Failed to allocate image memory.");
+        }
+
+        // Device, vertex buffer, device memory and offset within the device memory.
+        vkBindImageMemory(arg.device, image, imageMemory, 0);
+        
+        return ok(forward!arg);
+    })
+    ;
+}
+
+void transitionImageLayout(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkImage image,
+    from!"erupted".VkFormat format, // TODO: superfluous?
+    from!"erupted".VkImageLayout oldLayout,
+    from!"erupted".VkImageLayout newLayout,
+) nothrow @nogc @trusted
+{
+    import erupted;
+
+    auto commandBuffer = beginSingleTimeCommands(device, commandPool);
+
+    VkImageMemoryBarrier barrier =
+    {
+        oldLayout : oldLayout, // Possible to use VK_IMAGELAYOUT_UNDEFINED.
+        newLayout : newLayout,
+        // Specify queue indices for queue ownership transfer.
+        srcQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        image : image,
+        // Specify concrete image part to be affected (mip level and array indices for arrays of images).
+        subresourceRange :
+        {
+            aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+            baseMipLevel : 0,
+            levelCount : 1,
+            baseArrayLayer : 0,
+            layerCount : 1,
+        },
+    };
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    if(oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+    {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    }
+    else if(oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+    else
+    {
+        assert(false, "Unsupported layout transition.");
+    }
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage,
+        destinationStage,
+        0, // 0 or VK_DEPENDENCY_BY_REGION_BIT. The latter turn the barrier into a per-region condition
+        0, null,
+        0, null,
+        1, &barrier,
+    );
+
+    endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+}
+
+void copyBufferToImage(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkBuffer buffer,
+    from!"erupted".VkImage image,
+    in uint width, in uint height,
+) nothrow @nogc @trusted
+{
+    import erupted;
+    
+    auto commandBuffer = beginSingleTimeCommands(device, commandPool);
+
+    const VkBufferImageCopy region =
+    {
+        bufferOffset : 0,
+        // 0 for bufferRowLength and bufferImageHeight means that pixels are tightly packed.
+        bufferRowLength : 0,
+        bufferImageHeight : 0,
+        imageSubresource :
+        {
+            aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+            mipLevel : 0,
+            baseArrayLayer : 0,
+            layerCount : 1,
+        },
+        imageOffset :
+        {
+            x : 0,
+            y : 0,
+            z : 0,
+        },
+        imageExtent :
+        {
+            width : width,
+            height : height,
+            depth : 1,
+        },
+    };
+
+    vkCmdCopyBufferToImage(
+        commandBuffer,
+        buffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // Assumes that the image is already optimal as destination.
+        1, &region, // Array of regions.
+    );
+
+    endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+}
+
+auto createTextureImage(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+    import imagefmt : IFImage, read_image;
+
+    IFImage image;
+    VkDeviceSize imageSize;
+    uint textureWidth;
+    uint textureHeight;
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    VkImage textureImage;
+    VkDeviceMemory textureImageMemory;
+
+    return (auto ref arg)
+    {
+        image = read_image("source/textures/texture.jpg", 4);
+        if(image.e)
+        {
+            return err!T("Failed to load texture image.");
+        }
+        textureWidth = image.w;
+        textureHeight = image.h;
+        imageSize = image.w * image.h * image.c;
+        return ok(forward!arg);
+        // TODO: free image on error.
+    }(forward!arg)
+    .andThen!createBuffer(
+        imageSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingBufferMemory,
+    )
+    // TODO: free buffer on error.
+    .andThen!((auto ref arg)
+    {
+        import core.stdc.string : memcpy;
+
+        void* data;
+        vkMapMemory(arg.device, stagingBufferMemory, 0, imageSize, 0, &data);
+        memcpy(data, image.buf8.ptr, imageSize);
+        vkUnmapMemory(arg.device, stagingBufferMemory);
+        image.free();
+        return ok(forward!arg);
+    })
+    .andThen!createImage(
+        image.w, image.h,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // Sampled - for usage in shaders.
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        textureImage,
+        textureImageMemory,
+    )
+    .andThen!((auto ref arg)
+    {
+        alias Res = TupleCat!(T, Tuple!(
+            VkImage, "textureImage",
+            VkDeviceMemory, "textureImageMemory",
+        ));
+        auto res = partialConstruct!Res(forward!arg);
+        res.textureImage = textureImage.move;
+        res.textureImageMemory = textureImageMemory.move;
+
+        // TODO: create setupCommandBuffer and flushCommandBuffer functions instead of creating 3 independent command buffers.
+        transitionImageLayout(
+            res.device, res.commandPool, res.graphicsQueue,
+            res.textureImage,
+            VK_FORMAT_R8G8B8A8_SRGB,
+            VK_IMAGE_LAYOUT_UNDEFINED, // Image was created with undefined layout.
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        );
+
+        copyBufferToImage(
+            res.device, res.commandPool, res.graphicsQueue,
+            stagingBuffer,
+            res.textureImage,
+            textureWidth, textureHeight,
+        );
+
+        transitionImageLayout(
+            res.device, res.commandPool, res.graphicsQueue,
+            res.textureImage,
+            VK_FORMAT_R8G8B8A8_SRGB,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        );
+
+        vkDestroyBuffer(res.device, stagingBuffer, null);
+        vkFreeMemory(res.device, stagingBufferMemory, null);
+        
+        return ok(res.move);
+    })
+    ;
+}
+
+auto createTextureImageView(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.textureImage) : from!"erupted".VkImage)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, mapOrElse;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkImageView, "textureImageView",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    return createImageView(res.device, res.textureImage, VK_FORMAT_R8G8B8A8_SRGB)
+    .mapOrElse!(
+        (imageView)
+        {
+            res.textureImageView = imageView;
+            return ok(res.move);
+        },
+        e => err!Res(e),
+    )
     ;
 }
 
@@ -1548,6 +1909,56 @@ from!"erupted".VkCommandBuffer beginSingleTimeCommands(
     vkBeginCommandBuffer(commandBuffer, &beginInfo); // TODO: check result?
 
     return commandBuffer;
+}
+
+auto createTextureSampler(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkSampler, "textureSampler",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const VkSamplerCreateInfo sampelrInfo =
+    {
+        // Magnification for oversampling - more fragments than texels.
+        magFilter : VK_FILTER_LINEAR,
+        // Minification for undersampling - more texels than fragments.
+        minFilter : VK_FILTER_LINEAR,
+        // Modes: repeat, mirrored repeat, clamp to edge, mirror clamp to edge, clamp to border.
+        addressModeU : VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        addressModeV : VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        addressModeW : VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        // Anisotropic filtering is an optional device feature. Need to check VkPhysicalDeviceFeatures.samplerAnisotropy.
+        anisotropyEnable : VK_TRUE,
+        // Maximum amount of texel samples that can be used to calculate the final color.
+        // Today 16 is maximum.
+        maxAnisotropy : 16,
+        // Black, white or transparent.
+        borderColor : VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        // Example for 2D textures:
+        // True - [0, textureWidth) x [0, textureHeight)
+        // False - [0, 1) x [0, 1)
+        unnormalizedCoordinates : VK_FALSE,
+        // If enabled, texels will first be compared to a value, and the result is used in filtering operations.
+        // Mainly used for percentage-closer filtering on shadow maps.
+        compareEnable : VK_FALSE,
+        compareOp : VK_COMPARE_OP_ALWAYS,
+        mipmapMode : VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        mipLodBias : 0.0f,
+        minLod : 0.0f,
+        maxLod : 0.0f,
+    };
+
+    return vkCreateSampler(res.device, &sampelrInfo, null, &res.textureSampler) == VK_SUCCESS
+        ? ok(res.move)
+        : err!Res("Failed to create texture sampler.");
 }
 
 void endSingleTimeCommands(
@@ -1798,16 +2209,22 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    const VkDescriptorPoolSize poolSize =
-    {
-        type : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        descriptorCount : cast(uint) res.swapChainImages.length,
-    };
+    const VkDescriptorPoolSize[2] poolSizes =
+    [
+        {
+            type : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount : cast(uint) res.swapChainImages.length,
+        },
+        {
+            type : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount : cast(uint) res.swapChainImages.length,
+        }
+    ];
 
     const VkDescriptorPoolCreateInfo poolInfo =
     {
-        poolSizeCount : 1,
-        pPoolSizes : &poolSize,
+        poolSizeCount : poolSizes.length,
+        pPoolSizes : poolSizes.ptr,
         // Maximum number of descriptor sets that can be allocated.
         maxSets : cast(uint) res.swapChainImages.length,
         flags : 0
@@ -1825,6 +2242,8 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
     && is(typeof(arg.descriptorPool) : from!"erupted".VkDescriptorPool)
+    && is(typeof(arg.textureImageView) : from!"erupted".VkImageView)
+    && is(typeof(arg.textureSampler) : from!"erupted".VkSampler)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImages[])) : from!"erupted".VkImage)
     && is(from!"std.range".ElementType!(typeof(arg.uniformBuffers[])) : from!"erupted".VkBuffer)
 )
@@ -1866,25 +2285,42 @@ if(from!"std.typecons".isTuple!T
             range : UniformBufferObject.sizeof,
         };
 
-        const VkWriteDescriptorSet descriptorWrite =
+        const VkDescriptorImageInfo imageInfo =
         {
-            // What set and binding of the set to update.
-            dstSet : res.descriptorSets.ptr[i],
-            dstBinding : 0,
-            // Index of the first element, if descriptor is an array.
-            dstArrayElement : 0,
-            descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // Need to specify it again?!
-            descriptorCount : 1,
-            // For descriptors that refer to buffer data.
-            pBufferInfo : &bufferInfo,
-            // For descriptors that refer to image data.
-            pImageInfo : null, // Optional
-            // For descriptors that refer to buffer views.
-            pTexelBufferView : null, // Optional
+            imageLayout : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            imageView : res.textureImageView,
+            sampler : res.textureSampler,
         };
 
+        const VkWriteDescriptorSet[2] descriptorWrites =
+        [
+            {
+                // What set and binding of the set to update.
+                dstSet : res.descriptorSets.ptr[i],
+                dstBinding : 0,
+                // Index of the first element, if descriptor is an array.
+                dstArrayElement : 0,
+                descriptorType : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // Need to specify it again?!
+                descriptorCount : 1,
+                // For descriptors that refer to buffer data.
+                pBufferInfo : &bufferInfo,
+                // For descriptors that refer to image data.
+                pImageInfo : null, // Optional
+                // For descriptors that refer to buffer views.
+                pTexelBufferView : null, // Optional
+            },
+            {
+                dstSet : res.descriptorSets.ptr[i],
+                dstBinding : 1,
+                dstArrayElement : 0,
+                descriptorType : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                descriptorCount : 1,
+                pImageInfo : &imageInfo,
+            }
+        ];
+
         vkUpdateDescriptorSets(res.device,
-            1, &descriptorWrite, // Array of VkWriteDescriptorSet.
+            descriptorWrites.length, descriptorWrites.ptr, // Array of VkWriteDescriptorSet.
             0, null // Array of VkCopyDescriptorSet.
         );
     }
@@ -2406,6 +2842,10 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(typeof(arg.textureImageMemory) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.textureImage) : from!"erupted".VkImage)
+    && is(typeof(arg.textureImageView) : from!"erupted".VkImageView)
+    && is(typeof(arg.textureSampler) : from!"erupted".VkSampler)
     && is(typeof(arg.vertexBufferMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(typeof(arg.indexBufferMemory) : from!"erupted".VkDeviceMemory)
@@ -2439,6 +2879,11 @@ if(from!"std.typecons".isTuple!T
 
             vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
             vkFreeMemory(arg.device, arg.vertexBufferMemory, null);
+
+            vkDestroySampler(arg.device, arg.textureSampler, null);
+            vkDestroyImageView(arg.device, arg.textureImageView, null);
+            vkDestroyImage(arg.device, arg.textureImage, null);
+            vkFreeMemory(arg.device, arg.textureImageMemory, null);
 
             vkDestroyCommandPool(arg.device, arg.commandPool, null);
 
@@ -2477,6 +2922,9 @@ if(from!"std.typecons".isTuple!T
                 "device",
                 "descriptorSetLayout",
                 "commandPool",
+                "textureImageMemory",
+                "textureImage",
+                "textureImageView",
                 "vertexBufferMemory",
                 "vertexBuffer",
                 "indexBufferMemory",
