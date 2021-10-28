@@ -662,6 +662,12 @@ if(from!"std.typecons".isTuple!T
         .map!((elem)
         {
             elem[1].physicalDevice = elem[0];
+            VkPhysicalDeviceFeatures supportedFeatures;
+            vkGetPhysicalDeviceFeatures(elem[1].physicalDevice, &supportedFeatures);
+            if(!supportedFeatures.samplerAnisotropy)
+            {
+                return err!Res("Failed to find suitable GPU.");
+            }
             if(!checkDeviceExtensionSupport(elem[1].physicalDevice))
             {
                 return err!Res("Failed to find suitable GPU.");
@@ -718,7 +724,10 @@ if(from!"std.typecons".isTuple!T
         ++uniqueFamiliesCount;
     }
 
-    const VkPhysicalDeviceFeatures deviceFeatures;
+    const VkPhysicalDeviceFeatures deviceFeatures =
+    {
+        samplerAnisotropy : VK_TRUE,
+    };
 
     VkDeviceCreateInfo createInfo =
     {
@@ -1908,6 +1917,7 @@ if(from!"std.typecons".isTuple!T
         addressModeU : VK_SAMPLER_ADDRESS_MODE_REPEAT,
         addressModeV : VK_SAMPLER_ADDRESS_MODE_REPEAT,
         addressModeW : VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        // Anisotropic filtering is an optional device feature. Need to check VkPhysicalDeviceFeatures.samplerAnisotropy.
         anisotropyEnable : VK_TRUE,
         // Maximum amount of texel samples that can be used to calculate the final color.
         // Today 16 is maximum.
