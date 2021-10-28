@@ -153,6 +153,7 @@ if(from!"std.typecons".isTuple!T)
         .andThen!createCommandPool
         .andThen!createTextureImage
         .andThen!createTextureImageView
+        .andThen!createTextureSampler
         .andThen!createVertexBuffer
         .andThen!createIndexBuffer
         .andThen!createSwapChainAndRelatedObjects
@@ -1883,6 +1884,55 @@ from!"erupted".VkCommandBuffer beginSingleTimeCommands(
     return commandBuffer;
 }
 
+auto createTextureSampler(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.device) : from!"erupted".VkDevice)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err;
+
+    alias Res = TupleCat!(T, Tuple!(
+        VkSampler, "textureSampler",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
+
+    const VkSamplerCreateInfo sampelrInfo =
+    {
+        // Magnification for oversampling - more fragments than texels.
+        magFilter : VK_FILTER_LINEAR,
+        // Minification for undersampling - more texels than fragments.
+        minFilter : VK_FILTER_LINEAR,
+        // Modes: repeat, mirrored repeat, clamp to edge, mirror clamp to edge, clamp to border.
+        addressModeU : VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        addressModeV : VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        addressModeW : VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        anisotropyEnable : VK_TRUE,
+        // Maximum amount of texel samples that can be used to calculate the final color.
+        // Today 16 is maximum.
+        maxAnisotropy : 16,
+        // Black, white or transparent.
+        borderColor : VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        // Example for 2D textures:
+        // True - [0, textureWidth) x [0, textureHeight)
+        // False - [0, 1) x [0, 1)
+        unnormalizedCoordinates : VK_FALSE,
+        // If enabled, texels will first be compared to a value, and the result is used in filtering operations.
+        // Mainly used for percentage-closer filtering on shadow maps.
+        compareEnable : VK_FALSE,
+        compareOp : VK_COMPARE_OP_ALWAYS,
+        mipmapMode : VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        mipLodBias : 0.0f,
+        minLod : 0.0f,
+        maxLod : 0.0f,
+    };
+
+    return vkCreateSampler(res.device, &sampelrInfo, null, &res.textureSampler) == VK_SUCCESS
+        ? ok(res.move)
+        : err!Res("Failed to create texture sampler.");
+}
+
 void endSingleTimeCommands(
     from!"erupted".VkDevice device,
     from!"erupted".VkCommandPool commandPool,
@@ -2742,6 +2792,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.textureImageMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.textureImage) : from!"erupted".VkImage)
     && is(typeof(arg.textureImageView) : from!"erupted".VkImageView)
+    && is(typeof(arg.textureSampler) : from!"erupted".VkSampler)
     && is(typeof(arg.vertexBufferMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.vertexBuffer) : from!"erupted".VkBuffer)
     && is(typeof(arg.indexBufferMemory) : from!"erupted".VkDeviceMemory)
@@ -2776,6 +2827,7 @@ if(from!"std.typecons".isTuple!T
             vkDestroyBuffer(arg.device, arg.vertexBuffer, null);
             vkFreeMemory(arg.device, arg.vertexBufferMemory, null);
 
+            vkDestroySampler(arg.device, arg.textureSampler, null);
             vkDestroyImageView(arg.device, arg.textureImageView, null);
             vkDestroyImage(arg.device, arg.textureImage, null);
             vkFreeMemory(arg.device, arg.textureImageMemory, null);
