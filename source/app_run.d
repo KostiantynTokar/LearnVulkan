@@ -1578,6 +1578,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.depthImageView) : from!"erupted".VkImageView)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
 )
 {
@@ -1596,15 +1597,16 @@ if(from!"std.typecons".isTuple!T
 
     foreach (i, ref imageView; res.swapChainImageViews[].enumerate)
     {
-        const VkImageView[1] attachments =
+        const VkImageView[2] attachments =
         [
             imageView,
+            res.depthImageView,
         ];
 
         const VkFramebufferCreateInfo framebufferInfo =
         {
             renderPass : res.renderPass,
-            attachmentCount : 1,
+            attachmentCount : attachments.length,
             pAttachments : attachments.ptr,
             width : res.swapChainExtent.width,
             height : res.swapChainExtent.height,
