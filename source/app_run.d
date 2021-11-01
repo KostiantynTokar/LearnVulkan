@@ -2607,13 +2607,25 @@ if(from!"std.typecons".isTuple!T
             return err!Res("Failed to begin recording command buffer.");
         }
 
-        const VkClearValue clearColor =
-        {
-            color :
+        const VkClearValue[2] clearValues =
+        [
             {
-                float32 : [ 0.0f, 0.0f, 0.0f, 1.0f, ],
+                // clearColor
+                color :
+                {
+                    float32 : [ 0.0f, 0.0f, 0.0f, 1.0f, ],
+                },
             },
-        };
+            {
+                // clearDepth
+                depthStencil :
+                {
+                    // Range from 0.0 (closest) to 1.0 (farthest).
+                    depth : 1.0f,
+                    stencil : 0,
+                }
+            }
+        ];
         
         const VkRenderPassBeginInfo renderPassInfo =
         {
@@ -2624,8 +2636,8 @@ if(from!"std.typecons".isTuple!T
                 offset : {0, 0},
                 extent : res.swapChainExtent,
             },
-            clearValueCount : 1,
-            pClearValues : &clearColor,
+            clearValueCount : clearValues.length,
+            pClearValues : clearValues.ptr,
         };
 
         // Inline - render pass commands embedded in the primary command buffer, no secondary buffers will be executed.
