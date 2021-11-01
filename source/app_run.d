@@ -1056,74 +1056,101 @@ if(from!"std.typecons".isTuple!T
 
 auto ref createRenderPass(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
 )
 {
     import util;
     import erupted;
-    import expected : ok, err;
+    import expected : ok, err, andThen;
 
-    alias Res = TupleCat!(T, Tuple!(
-        VkRenderPass, "renderPass"
-    ));
-    auto res = partialConstruct!Res(forward!arg);
-
-    const VkAttachmentDescription colorAttachment =
+    return findDepthFormat(arg.physicalDevice)
+    .andThen!((auto ref depthFormat, auto ref arg)
     {
-        format : res.swapChainImageFormat,
-        samples : VK_SAMPLE_COUNT_1_BIT,
-        loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
-        storeOp : VK_ATTACHMENT_STORE_OP_STORE,
-        stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
-        finalLayout : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
-    };
+        alias Res = TupleCat!(T, Tuple!(
+            VkRenderPass, "renderPass"
+        ));
+        auto res = partialConstruct!Res(forward!arg);
 
-    const VkAttachmentReference colorAttachmentRef =
-    {
-        attachment : 0, // Index in attachment array.
-        layout : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
+        const VkAttachmentDescription[2] attachments =
+        [
+            {
+                // colorAttachment
+                format : res.swapChainImageFormat,
+                samples : VK_SAMPLE_COUNT_1_BIT,
+                loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
+                storeOp : VK_ATTACHMENT_STORE_OP_STORE,
+                stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
+                finalLayout : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
+            },
+            {
+                // depthAttachment
+                format : depthFormat,
+                samples : VK_SAMPLE_COUNT_1_BIT,
+                loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
+                storeOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
+                finalLayout : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            },
+        ];
 
-    const VkSubpassDescription subpass =
-    {
-        // Use for graphics.
-        pipelineBindPoint : VK_PIPELINE_BIND_POINT_GRAPHICS,
-        colorAttachmentCount : 1,
-        // Index in this array referenced from the fragment shader layout(location=0) out vec4 outColor directive.
-        pColorAttachments : &colorAttachmentRef,
-    };
+        const VkAttachmentReference colorAttachmentRef =
+        {
+            attachment : 0, // Index in attachment array.
+            layout : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        };
 
-    const VkSubpassDependency dependency =
-    {
-        srcSubpass : VK_SUBPASS_EXTERNAL, // Refers to implicit subpass before and after render pass.
-        dstSubpass : 0, // This subpass's index.
+        const VkAttachmentReference depthAttachmentRef =
+        {
+            attachment : 1,
+            layout : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        };
 
-        // What operations to wait.
-        srcStageMask : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        srcAccessMask : 0,
+        const VkSubpassDescription subpass =
+        {
+            // Use for graphics.
+            pipelineBindPoint : VK_PIPELINE_BIND_POINT_GRAPHICS,
+            colorAttachmentCount : 1,
+            // Index in this array referenced from the fragment shader layout(location=0) out vec4 outColor directive.
+            pColorAttachments : &colorAttachmentRef,
+            pDepthStencilAttachment : &depthAttachmentRef,
+        };
 
-        // What operations are delayed.
-        dstStageMask : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        dstAccessMask : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-    };
+        const VkSubpassDependency dependency =
+        {
+            srcSubpass : VK_SUBPASS_EXTERNAL, // Refers to implicit subpass before and after render pass.
+            dstSubpass : 0, // This subpass's index.
 
-    const VkRenderPassCreateInfo renderPassInfo =
-    {
-        attachmentCount : 1,
-        pAttachments : &colorAttachment,
-        subpassCount : 1,
-        pSubpasses : &subpass,
+            // What operations to wait.
+            srcStageMask : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            srcAccessMask : 0,
 
-        dependencyCount : 1,
-        pDependencies : &dependency,
-    };
+            // What operations are delayed.
+            dstStageMask : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            dstAccessMask : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        };
 
-    return vkCreateRenderPass(res.device, &renderPassInfo, null, &res.renderPass) == VK_SUCCESS
-        ? ok(res.move)
-        : err!Res("Failed to create render pass.");
+        const VkRenderPassCreateInfo renderPassInfo =
+        {
+            attachmentCount : attachments.length,
+            pAttachments : attachments.ptr,
+            subpassCount : 1,
+            pSubpasses : &subpass,
+
+            dependencyCount : 1,
+            pDependencies : &dependency,
+        };
+
+        return vkCreateRenderPass(res.device, &renderPassInfo, null, &res.renderPass) == VK_SUCCESS
+            ? ok(res.move)
+            : err!Res("Failed to create render pass.");
+    })(forward!arg)
+    ;
 }
 
 auto ref createShaderModule(from!"erupted".VkDevice device, const(ubyte)[] code) nothrow @nogc @trusted
