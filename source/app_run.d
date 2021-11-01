@@ -37,7 +37,7 @@ struct Vertex
     import gfm.math : vec2f, vec3f;
     import erupted;
 
-    vec2f pos;
+    vec3f pos;
     vec3f color;
     vec2f texCoord;
 
@@ -65,7 +65,7 @@ struct Vertex
                 // Input location in the vertex shader.
                 location : 0,
                 // Formats: R32[G32[B32[A32]]]_<SFLOAT|SINT|UINT> etc.
-                format : VK_FORMAT_R32G32_SFLOAT,
+                format : VK_FORMAT_R32G32B32_SFLOAT,
                 offset : Vertex.pos.offsetof,
             },
             {
@@ -85,18 +85,40 @@ struct Vertex
     }
 }
 
-immutable Vertex[4] vertices = ()
+immutable vertices = ()
 {
+    import std.array : staticArray;
     import gfm.math : vec2f, vec3f;
-    immutable Vertex[4] vertices = [
-        { vec2f(-0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) },
-        { vec2f( 0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) },
-        { vec2f( 0.5f,  0.5f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) },
-        { vec2f(-0.5f,  0.5f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) },
-    ];
-    return vertices;
+    return
+        [
+            Vertex( vec3f(-0.5f, -0.5f,  0.0f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) ),
+            Vertex( vec3f( 0.5f, -0.5f,  0.0f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) ),
+            Vertex( vec3f( 0.5f,  0.5f,  0.0f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) ),
+            Vertex( vec3f(-0.5f,  0.5f,  0.0f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) ),
+
+            Vertex( vec3f(-0.5f, -0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) ),
+            Vertex( vec3f( 0.5f, -0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) ),
+            Vertex( vec3f( 0.5f,  0.5f, -0.5f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) ),
+            Vertex( vec3f(-0.5f,  0.5f, -0.5f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) ),
+        ]
+        .staticArray
+        ;
 }();
-immutable ushort[6] indices = [ 0, 1, 2, 2, 3, 0];
+immutable indices = ()
+{
+    import std.array : staticArray;
+    static ushort s(int n)
+    {
+        return cast(ushort) n;
+    }
+    return
+        [
+            s(0), s(1), s(2), s(2), s(3), s(0),
+            s(4), s(5), s(6), s(6), s(7), s(4),
+        ]
+        .staticArray
+        ;
+}();
 
 struct UniformBufferObject
 {
