@@ -838,6 +838,7 @@ if(from!"std.typecons".isTuple!T
         .andThen!createSwapChainImageViews
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
+        .andThen!createDepthResources
         .andThen!createFramebuffers
         .andThen!createUniformBuffers
         .andThen!createDescriptorPool
@@ -1423,6 +1424,114 @@ if(from!"std.typecons".isTuple!T
                 })
                 ;
         });
+}
+
+from!"expected".Expected!(from!"erupted".VkFormat) findSupportedFormat(VkFormatRange)(
+    from!"erupted".VkPhysicalDevice physicalDevice,
+    from!"erupted".VkImageTiling tiling,
+    from!"erupted".VkFormatFeatureFlags features,
+    VkFormatRange candidates,
+) nothrow @nogc @trusted
+if(from!"std.range".isInputRange!VkFormatRange
+    && is(from!"std.range".ElementType!VkFormatRange : from!"erupted".VkFormat)
+)
+{
+    import erupted;
+    import expected : ok, err;
+
+    foreach(format; candidates)
+    {
+        // props contains linearTilingFeatures, optimalTilingFeatures, bufferFeatures.
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
+        if(tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features)
+        {
+            return ok(format);
+        }
+        else if(tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features)
+        {
+            return ok(format);
+        }
+    }
+
+    return err!VkFormat("Failed to find supported format.");
+}
+
+auto findDepthFormat(
+    from!"erupted".VkPhysicalDevice physicalDevice,
+) nothrow @nogc @trusted
+{
+    import std.range : only;
+    import erupted;
+
+    return findSupportedFormat(
+        physicalDevice,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        only
+        (
+            VK_FORMAT_D32_SFLOAT,
+            VK_FORMAT_D32_SFLOAT_S8_UINT,
+            VK_FORMAT_D24_UNORM_S8_UINT
+        ),
+    );
+}
+
+bool hasStencilComponent(from!"erupted".VkFormat format) pure nothrow @nogc @safe
+{
+    import erupted;
+    return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
+}
+
+auto ref createDepthResources(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
+    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+
+    VkImage depthImage;
+    VkDeviceMemory depthImageMemory;
+
+    return findDepthFormat(arg.physicalDevice)
+    .andThen!((auto ref depthFormat, auto ref arg)
+    {
+        auto extent = arg.swapChainExtent;
+        return createImage(
+            forward!arg,
+            extent.width, extent.height,
+            depthFormat,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            depthImage,
+            depthImageMemory,
+        )
+        .andThen!((auto ref arg)
+        {
+            return createImageView(arg.device, depthImage, depthFormat)
+            .andThen!((auto ref depthImageView)
+            {
+                alias Res = TupleCat!(T, Tuple!(
+                    VkImage, "depthImage",
+                    VkDeviceMemory, "depthImageMemory",
+                    VkImageView, "depthImageView",
+                ));
+                auto res = partialConstruct!Res(forward!arg);
+
+                res.depthImage = depthImage;
+                res.depthImageMemory = depthImageMemory;
+                res.depthImageView = depthImageView;
+                return ok(res);
+            })
+            ;
+        })
+        ;
+    })(forward!arg)
+    ;
 }
 
 auto ref createFramebuffers(T)(auto ref T arg) nothrow @nogc @trusted
@@ -2783,6 +2892,9 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(typeof(arg.depthImage) : from!"erupted".VkImage)
+    && is(typeof(arg.depthImageMemory) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.depthImageView) : from!"erupted".VkImageView)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainFramebuffers[])) : from!"erupted".VkFramebuffer)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(from!"std.range".ElementType!(typeof(arg.commandBuffers[])) : from!"erupted".VkCommandBuffer)
@@ -2816,6 +2928,10 @@ if(from!"std.typecons".isTuple!T
 
     vkFreeCommandBuffers(arg.device, arg.commandPool,
         cast(uint) arg.commandBuffers.length, arg.commandBuffers.ptr);
+    
+    vkDestroyImageView(arg.device, arg.depthImageView, null);
+    vkDestroyImage(arg.device, arg.depthImage, null);
+    vkFreeMemory(arg.device, arg.depthImageMemory, null);
 
     vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
     vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
@@ -2837,6 +2953,9 @@ if(from!"std.typecons".isTuple!T
         "renderPass",
         "pipelineLayout",
         "graphicsPipeline",
+        "depthImage",
+        "depthImageMemory",
+        "depthImageView",
         "swapChainFramebuffers",
         "uniformBuffers",
         "uniformBuffersMemory",
