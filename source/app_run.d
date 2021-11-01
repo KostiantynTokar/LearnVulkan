@@ -948,9 +948,11 @@ if(from!"std.typecons".isTuple!T
     return ok(res.move);
 }
 
-auto createImageViews(Range)(from!"erupted".VkDevice device, Range imagesAndFormats)
+auto createImageViews(Range)(from!"erupted".VkDevice device, Range imagesAndFormatsAndAspectFlags)
 if(from!"std.range".isInputRange!Range
-    && is(from!"std.range".ElementType!Range : from!"std.typecons".Tuple!(from!"erupted".VkImage, from!"erupted".VkFormat))
+    && is(typeof(from!"std.range".ElementType!Range.init[0]) : from!"erupted".VkImage)
+    && is(typeof(from!"std.range".ElementType!Range.init[1]) : from!"erupted".VkFormat)
+    && is(typeof(from!"std.range".ElementType!Range.init[2]) : from!"erupted".VkImageAspectFlags)
 )
 {
     import std.range : zip, repeat;
@@ -958,7 +960,7 @@ if(from!"std.range".isInputRange!Range
     import erupted;
     import expected : ok, err;
 
-    return device.repeat.zip(imagesAndFormats).map!(
+    return device.repeat.zip(imagesAndFormatsAndAspectFlags).map!(
     (auto ref elem)
     {
         const VkImageViewCreateInfo viewInfo =
@@ -975,7 +977,7 @@ if(from!"std.range".isInputRange!Range
             },
             subresourceRange :
             {
-                aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+                aspectMask : elem[1][2],
                 baseMipLevel : 0,
                 levelCount : 1,
                 baseArrayLayer : 0,
@@ -996,11 +998,12 @@ auto createImageView(
     from!"erupted".VkDevice device,
     from!"erupted".VkImage image,
     from!"erupted".VkFormat format,
+    from!"erupted".VkImageAspectFlags aspectFlags,
 )
 {
     import std.typecons : tuple;
     import std.range : only;
-    return createImageViews(device, only(tuple(image, format))).front;
+    return createImageViews(device, only(tuple(image, format, aspectFlags))).front;
 }
 
 auto ref createSwapChainImageViews(T)(auto ref T arg) nothrow @nogc @trusted
@@ -1028,7 +1031,8 @@ if(from!"std.typecons".isTuple!T
         res.device,
         zip(
             res.swapChainImages[],
-            res.swapChainImageFormat.repeat(res.swapChainImages.length)
+            res.swapChainImageFormat.repeat(res.swapChainImages.length),
+            VK_IMAGE_ASPECT_COLOR_BIT.repeat(res.swapChainImages.length),
         )
     )
     .enumerate
@@ -1512,7 +1516,7 @@ if(from!"std.typecons".isTuple!T
         )
         .andThen!((auto ref arg)
         {
-            return createImageView(arg.device, depthImage, depthFormat)
+            return createImageView(arg.device, depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT)
             .andThen!((auto ref depthImageView)
             {
                 alias Res = TupleCat!(T, Tuple!(
@@ -2003,7 +2007,7 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    return createImageView(res.device, res.textureImage, VK_FORMAT_R8G8B8A8_SRGB)
+    return createImageView(res.device, res.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT)
     .mapOrElse!(
         (imageView)
         {
