@@ -5,12 +5,14 @@
 		"automem": "~>0.6.7",
 		"gfm": "~>8.0.6",
 		"bindbc-glfw": "~>1.0.0",
+		"bindbc-assimp": "~>0.0.1",
 		"erupted": "~>2.1.42+v1.2.192",
 		"expected": "0.3.1",
 		"optional": "~>1.2.1"
 	},
 	"subConfigurations": {
-		"bindbc-glfw": "staticBC"
+		"bindbc-glfw": "staticBC",
+		"bindbc-assimp": "static"
 	},
 	"versions": [
 		"GLFW_33"
@@ -24,26 +26,38 @@
 		"debug-app": {
 			"buildOptions": ["debugMode", "debugInfo"],
 			"debugVersions": ["LearnVulkan_ValidationLayers"],
-			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
+			"libs": [
+				"dependencies/glfw/build/src/Debug/glfw3",
+				"dependencies/assimp/build/lib/Debug/assimpd"
+			],
 			"dflags-ldc": ["-g", "-gc"],
 			"dflags-windows-ldc": ["--mscrtlib=msvcrtd"]
 		},
 		"release-app": {
 			"buildOptions": ["releaseMode", "optimize", "inline"],
-			"libs": ["dependencies/glfw/build/src/Release/glfw3"],
+			"libs": [
+				"dependencies/glfw/build/src/Release/glfw3",
+				"dependencies/assimp/build/lib/Release/assimp"
+			],
 			"dflags-windows-ldc": ["--mscrtlib=msvcrt"]
 		},
 		"unittest": {
 			"buildOptions": ["unittests", "debugMode", "debugInfo"],
 			"debugVersions": ["LearnVulkan_ValidationLayers"],
-			"libs": ["dependencies/glfw/build/src/Debug/glfw3"],
+			"libs": [
+				"dependencies/glfw/build/src/Debug/glfw3",
+				"dependencies/assimp/build/lib/Debug/assimpd"
+			],
 			"dflags-ldc": ["-g", "-gc"],
 			"dflags-windows-ldc": ["--mscrtlib=msvcrtd"]
 		},
 		"unittest-opt": 
 		{
 			"buildOptions": ["unittests", "optimize", "inline"],
-			"libs": ["dependencies/glfw/build/src/Release/glfw3"],
+			"libs": [
+				"dependencies/glfw/build/src/Release/glfw3",
+				"dependencies/assimp/build/lib/Release/assimp"
+			],
 			"dflags-windows-ldc": ["--mscrtlib=msvcrt"]
 		}
 	},
