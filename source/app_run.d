@@ -30,6 +30,9 @@ else
 enum StartWindowWidth = 800;
 enum StartWindowHeight = 600;
 
+enum ModelPath = "source/models/viking_room.obj";
+enum TexturePath = "source/textures/viking_room.png";
+
 enum MaxFramesInFlight = 3;
 
 struct Vertex
@@ -1979,7 +1982,7 @@ if(from!"std.typecons".isTuple!T
 
     return (auto ref arg)
     {
-        image = read_image("source/textures/texture.jpg", 4);
+        image = read_image(TexturePath, 4);
         if(image.e)
         {
             return err!T("Failed to load texture image.");
