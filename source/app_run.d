@@ -1357,7 +1357,21 @@ if(from!"std.typecons".isTuple!T
                     };
 
                     // Optional
-                    // VkPipelineDepthStencilStateCreateInfo depthStencil;
+                    const VkPipelineDepthStencilStateCreateInfo depthStencil =
+                    {
+                        depthTestEnable : VK_TRUE,
+                        // Disabling the writes useful for drawing transparent objects. 
+                        depthWriteEnable : VK_TRUE,
+                        // Less - lower depth means closer.
+                        depthCompareOp : VK_COMPARE_OP_LESS,
+                        // Discard fragments with depth that is outside the bounds.
+                        depthBoundsTestEnable : VK_FALSE,
+                        minDepthBounds : 0.0f, // Optional
+                        maxDepthBounds : 1.0f, // Optional
+                        stencilTestEnable : VK_FALSE,
+                        front : {}, // Optional
+                        back : {}, // Optional
+                    };
                     
                     // Framebuffer-specific blending options.
                     const VkPipelineColorBlendAttachmentState colorBlendAttachment =
@@ -1423,7 +1437,7 @@ if(from!"std.typecons".isTuple!T
                         pViewportState : &viewportState,
                         pRasterizationState : &rasterizer,
                         pMultisampleState : &multisampling,
-                        pDepthStencilState : null, // Optional
+                        pDepthStencilState : &depthStencil, // Optional, unless render pass contains a depth stencil attachment.
                         pColorBlendState : &colorBlending,
                         pDynamicState : null, // Optional
                         layout : res.pipelineLayout,
