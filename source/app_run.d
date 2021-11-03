@@ -186,6 +186,7 @@ if(from!"std.typecons".isTuple!T)
         .andThen!createTextureImage
         .andThen!createTextureImageView
         .andThen!createTextureSampler
+        .andThen!loadModel
         .andThen!createVertexBuffer
         .andThen!createIndexBuffer
         .andThen!createSwapChainAndRelatedObjects
@@ -2213,6 +2214,26 @@ void copyBuffer(
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
     endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+}
+
+auto ref loadModel(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+)
+{
+    import util;
+    import bindbc.assimp;
+    import expected : ok, err;
+
+    const scene = aiImportFile(ModelPath, aiPostProcessSteps.Triangulate);
+
+    if(!scene)
+    {
+        return err!T("Failed to load model.");
+    }
+
+    aiReleaseImport(scene);
+
+    return ok(forward!arg);
 }
 
 auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
