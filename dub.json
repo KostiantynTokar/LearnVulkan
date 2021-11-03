@@ -26,18 +26,18 @@
 		"debug-app": {
 			"buildOptions": ["debugMode", "debugInfo"],
 			"debugVersions": ["LearnVulkan_ValidationLayers"],
-			"libs": [
+			"libs-windows": [
 				"dependencies/glfw/build/src/Debug/glfw3",
-				"dependencies/assimp/build/lib/Debug/assimpd"
+				"dependencies/assimp/build/lib/Debug/assimp-vc142-mtd"
 			],
 			"dflags-ldc": ["-g", "-gc"],
 			"dflags-windows-ldc": ["--mscrtlib=msvcrtd"]
 		},
 		"release-app": {
 			"buildOptions": ["releaseMode", "optimize", "inline"],
-			"libs": [
+			"libs-windows": [
 				"dependencies/glfw/build/src/Release/glfw3",
-				"dependencies/assimp/build/lib/Release/assimp"
+				"dependencies/assimp/build/lib/Release/assimp-vc142-mt"
 			],
 			"dflags-windows-ldc": ["--mscrtlib=msvcrt"]
 		},
