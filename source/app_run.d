@@ -2255,6 +2255,7 @@ if(from!"std.typecons".isTuple!T
             res.indices ~= cast(uint) res.indices.length;
         }
 
+        // TODO: why mesh.mFaces is pointing to 0x1b1b1b1b1b1b1b1b? It should be a valid array.
         // foreach(const aiFace face; mesh.mFaces[0 .. mesh.mNumFaces])
         // {
         //     foreach(index; face.mIndices[0 .. face.mNumIndices])
