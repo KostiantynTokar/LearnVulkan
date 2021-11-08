@@ -1967,16 +1967,30 @@ void copyBufferToImage(
     endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
 }
 
-void generateMipmaps(
+from!"expected".Expected!void generateMipmaps(
+    from!"erupted".VkPhysicalDevice physicalDevice,
     from!"erupted".VkDevice device,
     from!"erupted".VkCommandPool commandPool,
     from!"erupted".VkQueue transferQueue,
     from!"erupted".VkImage image,
+    from!"erupted".VkFormat imageFormat,
     in uint textureWidth, in uint textureHeight,
     in uint mipLevels,
 ) nothrow @nogc @trusted 
 {
     import erupted;
+    import expected : ok, err;
+
+    // TODO: vkGetPhysicalDeviceFormatProperties is already called somewhere previously. Do not repeat.
+    VkFormatProperties formatProperties;
+    vkGetPhysicalDeviceFormatProperties(physicalDevice, imageFormat, &formatProperties);
+    if(!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT))
+    {
+        // In this case it is possible to find image format that supports blitting,
+        // or generate mipmaps on CPU and load them to GPU separately.
+        // Usually all texture mipmaps are pregenerated and stored in one file.
+        return err!void("Image format does not support linear blitting, unable to generate mipmaps.");
+    }
 
     auto commandBuffer = beginSingleTimeCommands(device, commandPool);
 
@@ -2094,10 +2108,13 @@ void generateMipmaps(
     );
 
     endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+
+    return ok();
 }
 
 auto createTextureImage(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
@@ -2197,12 +2214,18 @@ if(from!"std.typecons".isTuple!T
         vkFreeMemory(res.device, stagingBufferMemory, null);
 
         // Image transfered to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL in generateMipmaps.
-        generateMipmaps(
+        auto exp = generateMipmaps(
+            res.physicalDevice,
             res.device, res.commandPool, res.graphicsQueue,
             res.textureImage,
+            VK_FORMAT_R8G8B8A8_SRGB,
             textureWidth, textureHeight,
             res.mipLevels,
         );
+        if(exp.hasError)
+        {
+            return err!Res(exp.error);
+        }
         
         return ok(res.move);
     })
