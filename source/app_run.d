@@ -1967,6 +1967,135 @@ void copyBufferToImage(
     endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
 }
 
+void generateMipmaps(
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkImage image,
+    in uint textureWidth, in uint textureHeight,
+    in uint mipLevels,
+) nothrow @nogc @trusted 
+{
+    import erupted;
+
+    auto commandBuffer = beginSingleTimeCommands(device, commandPool);
+
+    VkImageMemoryBarrier barrier =
+    {
+        image : image,
+        srcQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        subresourceRange :
+        {
+            aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+            baseArrayLayer : 0,
+            layerCount : 1,
+            levelCount : 1,
+        },
+    };
+
+    uint mipWidth = textureWidth;
+    uint mipHeight = textureHeight;
+
+    foreach(uint i; 1 .. mipLevels)
+    {
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+        // Barrier to wait on previous transition and on vkCmdCopyBufferToImage.
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, null,
+            0, null,
+            1, &barrier,
+        );
+
+        const VkImageBlit blit =
+        {
+            srcOffsets :
+            [
+                { 0, 0, 0 },
+                { mipWidth, mipHeight, 1 }
+            ],
+            srcSubresource :
+            {
+                aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+                mipLevel : i - 1,
+                baseArrayLayer : 0,
+                layerCount : 1,
+            },
+            dstOffsets :
+            [
+                { 0, 0, 0 },
+                { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1 },
+            ],
+            dstSubresource :
+            {
+                aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+                mipLevel : i,
+                baseArrayLayer : 0,
+                layerCount : 1,
+            },
+        };
+
+        vkCmdBlitImage(
+            commandBuffer,
+            image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, // Need to specify current leyout of the image.
+            image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &blit,
+            VK_FILTER_LINEAR,
+        );
+
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,
+            0, null,
+            0, null,
+            1, &barrier,
+        );
+
+        if(mipWidth > 1)
+        {
+            mipWidth /= 2;
+        }
+        if(mipHeight > 1)
+        {
+            mipHeight /= 2;
+        }
+    }
+
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, null,
+        0, null,
+        1, &barrier,
+    );
+
+    endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+}
+
 auto createTextureImage(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
@@ -2029,7 +2158,8 @@ if(from!"std.typecons".isTuple!T
         mipLevels,
         VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // Sampled - for usage in shaders.
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT // Sampled - for usage in shaders.
+        | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, // For blitting in mipmap generation.
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         textureImage,
         textureImageMemory,
@@ -2046,7 +2176,7 @@ if(from!"std.typecons".isTuple!T
         res.textureImageMemory = textureImageMemory.move;
         res.mipLevels = mipLevels.move;
 
-        // TODO: create setupCommandBuffer and flushCommandBuffer functions instead of creating 3 independent command buffers.
+        // TODO: create setupCommandBuffer and flushCommandBuffer functions instead of creating multiple independent command buffers.
         transitionImageLayout(
             res.device, res.commandPool, res.graphicsQueue,
             res.textureImage,
@@ -2063,17 +2193,16 @@ if(from!"std.typecons".isTuple!T
             textureWidth, textureHeight,
         );
 
-        transitionImageLayout(
-            res.device, res.commandPool, res.graphicsQueue,
-            res.textureImage,
-            VK_FORMAT_R8G8B8A8_SRGB,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            res.mipLevels,
-        );
-
         vkDestroyBuffer(res.device, stagingBuffer, null);
         vkFreeMemory(res.device, stagingBufferMemory, null);
+
+        // Image transfered to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL in generateMipmaps.
+        generateMipmaps(
+            res.device, res.commandPool, res.graphicsQueue,
+            res.textureImage,
+            textureWidth, textureHeight,
+            res.mipLevels,
+        );
         
         return ok(res.move);
     })
