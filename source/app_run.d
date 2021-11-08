@@ -88,40 +88,40 @@ struct Vertex
     }
 }
 
-immutable vertices = ()
-{
-    import std.array : staticArray;
-    import gfm.math : vec2f, vec3f;
-    return
-        [
-            Vertex( vec3f(-0.5f, -0.5f,  0.0f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) ),
-            Vertex( vec3f( 0.5f, -0.5f,  0.0f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) ),
-            Vertex( vec3f( 0.5f,  0.5f,  0.0f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) ),
-            Vertex( vec3f(-0.5f,  0.5f,  0.0f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) ),
+// immutable vertices = ()
+// {
+//     import std.array : staticArray;
+//     import gfm.math : vec2f, vec3f;
+//     return
+//         [
+//             Vertex( vec3f(-0.5f, -0.5f,  0.0f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) ),
+//             Vertex( vec3f( 0.5f, -0.5f,  0.0f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) ),
+//             Vertex( vec3f( 0.5f,  0.5f,  0.0f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) ),
+//             Vertex( vec3f(-0.5f,  0.5f,  0.0f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) ),
 
-            Vertex( vec3f(-0.5f, -0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) ),
-            Vertex( vec3f( 0.5f, -0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) ),
-            Vertex( vec3f( 0.5f,  0.5f, -0.5f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) ),
-            Vertex( vec3f(-0.5f,  0.5f, -0.5f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) ),
-        ]
-        .staticArray
-        ;
-}();
-immutable indices = ()
-{
-    import std.array : staticArray;
-    static ushort s(int n)
-    {
-        return cast(ushort) n;
-    }
-    return
-        [
-            s(0), s(1), s(2), s(2), s(3), s(0),
-            s(4), s(5), s(6), s(6), s(7), s(4),
-        ]
-        .staticArray
-        ;
-}();
+//             Vertex( vec3f(-0.5f, -0.5f, -0.5f), vec3f(1.0f, 0.0f, 0.0f), vec2f(0.0f, 0.0f) ),
+//             Vertex( vec3f( 0.5f, -0.5f, -0.5f), vec3f(0.0f, 1.0f, 0.0f), vec2f(1.0f, 0.0f) ),
+//             Vertex( vec3f( 0.5f,  0.5f, -0.5f), vec3f(0.0f, 0.0f, 1.0f), vec2f(1.0f, 1.0f) ),
+//             Vertex( vec3f(-0.5f,  0.5f, -0.5f), vec3f(1.0f, 1.0f, 1.0f), vec2f(0.0f, 1.0f) ),
+//         ]
+//         .staticArray
+//         ;
+// }();
+// immutable indices = ()
+// {
+//     import std.array : staticArray;
+//     static ushort s(int n)
+//     {
+//         return cast(ushort) n;
+//     }
+//     return
+//         [
+//             s(0), s(1), s(2), s(2), s(3), s(0),
+//             s(4), s(5), s(6), s(6), s(7), s(4),
+//         ]
+//         .staticArray
+//         ;
+// }();
 
 struct UniformBufferObject
 {
@@ -2221,31 +2221,80 @@ if(from!"std.typecons".isTuple!T
 )
 {
     import util;
+    import std.experimental.allocator.mallocator : Mallocator;
     import bindbc.assimp;
+    import gfm.math : vec2f, vec3f;
     import expected : ok, err;
+    import automem : Vector;
 
-    const scene = aiImportFile(ModelPath, aiPostProcessSteps.Triangulate);
+    alias Res = TupleCat!(T, Tuple!(
+        Vector!(Vertex, Mallocator), "vertices",
+        Vector!(uint, Mallocator), "indices",
+    ));
+    auto res = partialConstruct!Res(forward!arg);
 
-    if(!scene)
+    const scene = aiImportFile(ModelPath, aiPostProcessSteps.Triangulate | aiPostProcessSteps.FlipUVs);
+
+    if(!scene || scene.mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene.mRootNode)
     {
-        return err!T("Failed to load model.");
+        return err!Res("Failed to load model.");
+    }
+    scope(exit) aiReleaseImport(scene);
+
+    void processMesh(const aiMesh* mesh, const aiScene* scene)
+    {
+        foreach(i; 0 .. mesh.mNumVertices)
+        {
+            Vertex v =
+            {
+                pos : vec3f(mesh.mVertices[i].x, mesh.mVertices[i].y, mesh.mVertices[i].z),
+                color : vec3f(1.0f, 1.0f, 1.0f),
+                texCoord : vec2f(mesh.mTextureCoords[0][i].x, mesh.mTextureCoords[0][i].y),
+            };
+            res.vertices ~= v;
+            res.indices ~= cast(uint) res.indices.length;
+        }
+
+        // foreach(const aiFace face; mesh.mFaces[0 .. mesh.mNumFaces])
+        // {
+        //     foreach(index; face.mIndices[0 .. face.mNumIndices])
+        //     {
+        //         res.indices ~= index;
+        //     }
+        // }
     }
 
-    aiReleaseImport(scene);
+    void processNode(const aiNode* node, const aiScene* scene)
+    {
+        foreach(i; 0 .. node.mNumMeshes)
+        {
+            const aiMesh* mesh = scene.mMeshes[node.mMeshes[i]];
+            processMesh(mesh, scene);
+        }
 
-    return ok(forward!arg);
+        foreach(i; 0 .. node.mNumChildren)
+        {
+            processNode(node.mChildren[i], scene);
+        }
+    }
+
+    processNode(scene.mRootNode, scene);
+
+    return ok(res.move);
 }
 
 auto ref createVertexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.vertices[]))
 )
 {
     import util;
+    import std.range : ElementType;
     import erupted;
     import expected : ok, err, andThen;
 
-    immutable VkDeviceSize bufferSize = vertices.sizeof;
+    immutable VkDeviceSize bufferSize = arg.vertices.length * ElementType!(typeof(arg.vertices[])).sizeof;
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
@@ -2272,7 +2321,7 @@ if(from!"std.typecons".isTuple!T
             0, // Flags, not used in current API.
             &data
         );
-        memcpy(data, vertices.ptr, vertices.sizeof);
+        memcpy(data, arg.vertices.ptr, bufferSize);
         vkUnmapMemory(arg.device, stagingBufferMemory);
         
         return ok(forward!arg);
@@ -2308,13 +2357,15 @@ if(from!"std.typecons".isTuple!T
 auto ref createIndexBuffer(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.indices))
 )
 {
     import util;
+    import std.range : ElementType;
     import erupted;
     import expected : ok, err, andThen;
 
-    immutable VkDeviceSize bufferSize = indices.sizeof;
+    immutable VkDeviceSize bufferSize = arg.indices.length * ElementType!(typeof(arg.indices[])).sizeof;
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
@@ -2341,7 +2392,7 @@ if(from!"std.typecons".isTuple!T
             0, // Flags, not used in current API.
             &data
         );
-        memcpy(data, indices.ptr, indices.sizeof);
+        memcpy(data, arg.indices.ptr, bufferSize);
         vkUnmapMemory(arg.device, stagingBufferMemory);
         
         return ok(forward!arg);
@@ -2700,7 +2751,7 @@ if(from!"std.typecons".isTuple!T
         );
 
         // Type is UINT16 or UINT32.
-        vkCmdBindIndexBuffer(commandBuffer, res.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(commandBuffer, res.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdBindDescriptorSets(
             commandBuffer,
@@ -2716,7 +2767,7 @@ if(from!"std.typecons".isTuple!T
         
         // vkCmdDraw(
         //     commandBuffer,
-        //     vertices.length, // vertexCount.
+        //     cast(uint) res.vertices.length, // vertexCount.
         //     1, // instanceCount
         //     0, // firstVertex - lowest value of gl_VertexIndex
         //     0, // firstInstance - lowest value of gl_InstanceIndex
@@ -2724,7 +2775,7 @@ if(from!"std.typecons".isTuple!T
 
         vkCmdDrawIndexed(
             commandBuffer,
-            indices.length, // vertexCount.
+            cast(uint) res.indices.length, // vertexCount.
             1, // instanceCount
             0, // Offset into the index buffer in indices, not bytes.
             0, // Offset to add to the indices in the index buffer.
