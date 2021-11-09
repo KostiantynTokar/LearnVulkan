@@ -657,6 +657,40 @@ bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow
     return true;
 }
 
+from!"erupted".VkSampleCountFlagBits getMaxUsableSampleCount(
+    from!"erupted".VkPhysicalDevice physicalDevice,
+) nothrow @nogc @trusted
+{
+    import erupted;
+
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+    const VkSampleCountFlags counts =
+        properties.limits.framebufferColorSampleCounts &
+        properties.limits.framebufferDepthSampleCounts;
+    if(counts & VK_SAMPLE_COUNT_64_BIT)
+    {
+        return VK_SAMPLE_COUNT_64_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_32_BIT)
+    {
+        return VK_SAMPLE_COUNT_32_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_16_BIT)
+    {
+        return VK_SAMPLE_COUNT_16_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_4_BIT)
+    {
+        return VK_SAMPLE_COUNT_4_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_2_BIT)
+    {
+        return VK_SAMPLE_COUNT_2_BIT;
+    }
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
 auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.instance) : from!"erupted".VkInstance)
@@ -675,6 +709,7 @@ if(from!"std.typecons".isTuple!T
         VkPhysicalDevice, "physicalDevice",
         QueueFamilyIndices, "queueFamilyIndices",
         ChosenSwapChainSupport, "chosenSwapChainSupport",
+        VkSampleCountFlagBits, "msaaSamples",
         ));
     auto res = partialConstruct!Res(forward!arg);
     
@@ -695,6 +730,8 @@ if(from!"std.typecons".isTuple!T
         .map!((elem)
         {
             elem[1].physicalDevice = elem[0];
+            // TODO: get msaa samples at later stage (after checks).
+            elem[1].msaaSamples = getMaxUsableSampleCount(elem[1].physicalDevice);
             VkPhysicalDeviceFeatures supportedFeatures;
             vkGetPhysicalDeviceFeatures(elem[1].physicalDevice, &supportedFeatures);
             if(!supportedFeatures.samplerAnisotropy)
