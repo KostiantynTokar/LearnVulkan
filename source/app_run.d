@@ -797,6 +797,8 @@ if(from!"std.typecons".isTuple!T
     const VkPhysicalDeviceFeatures deviceFeatures =
     {
         samplerAnisotropy : VK_TRUE,
+        // For anti-aliasing of geometry interior (MSAA only smooth the edges).
+        sampleRateShading : VK_TRUE,
     };
 
     VkDeviceCreateInfo createInfo =
@@ -1414,9 +1416,11 @@ if(from!"std.typecons".isTuple!T
                     // Multisampling requires a GPU feature.
                     const VkPipelineMultisampleStateCreateInfo multisampling =
                     {
-                        sampleShadingEnable : VK_FALSE,
+                        // Anti-aliasing for geometry interior (MSAA smooth only the edges).
+                        sampleShadingEnable : VK_TRUE,
+                        // Min factor for sample shading; closer to on is smoother.
+                        minSampleShading : 0.2f,
                         rasterizationSamples : res.msaaSamples,
-                        minSampleShading : 1.0f, // Optional
                         pSampleMask : null, // Optional
                         alphaToCoverageEnable : VK_FALSE, // Optional
                         alphaToOneEnable : VK_FALSE, // Optional
