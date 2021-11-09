@@ -2290,6 +2290,7 @@ from!"erupted".VkCommandBuffer beginSingleTimeCommands(
 auto createTextureSampler(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.mipLevels) : uint)
 )
 {
     import util;
@@ -2327,9 +2328,12 @@ if(from!"std.typecons".isTuple!T
         compareEnable : VK_FALSE,
         compareOp : VK_COMPARE_OP_ALWAYS,
         mipmapMode : VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        // Lod (level of detail) is calculated from screen size, then mipLodBias is added (result can be negative).
+        // If lod is negative, then magnifying filter is used, and minifying filter otherwise.
         mipLodBias : 0.0f,
+        // Then lod is clamped to [minLod, maxLod]. Mip level is a floot(lod), clamped to [0, texture.mipLevels].
         minLod : 0.0f,
-        maxLod : 0.0f,
+        maxLod : cast(float) res.mipLevels,
     };
 
     return vkCreateSampler(res.device, &sampelrInfo, null, &res.textureSampler) == VK_SUCCESS
