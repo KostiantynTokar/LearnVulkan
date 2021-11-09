@@ -1104,6 +1104,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
 )
 {
     import util;
@@ -1118,23 +1119,23 @@ if(from!"std.typecons".isTuple!T
         ));
         auto res = partialConstruct!Res(forward!arg);
 
-        const VkAttachmentDescription[2] attachments =
+        const VkAttachmentDescription[3] attachments =
         [
             {
                 // colorAttachment
                 format : res.swapChainImageFormat,
-                samples : VK_SAMPLE_COUNT_1_BIT,
+                samples : res.msaaSamples,
                 loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
                 storeOp : VK_ATTACHMENT_STORE_OP_STORE,
                 stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                 stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
                 initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
-                finalLayout : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
+                finalLayout : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             },
             {
                 // depthAttachment
                 format : depthFormat,
-                samples : VK_SAMPLE_COUNT_1_BIT,
+                samples : res.msaaSamples,
                 loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
                 storeOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
                 stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -1142,6 +1143,17 @@ if(from!"std.typecons".isTuple!T
                 initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
                 finalLayout : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             },
+            {
+                // colorAttachmentResolve
+                format : res.swapChainImageFormat,
+                samples : VK_SAMPLE_COUNT_1_BIT,
+                loadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                storeOp : VK_ATTACHMENT_STORE_OP_STORE,
+                stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
+                finalLayout : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
+            }
         ];
 
         const VkAttachmentReference colorAttachmentRef =
@@ -1156,6 +1168,12 @@ if(from!"std.typecons".isTuple!T
             layout : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         };
 
+        const VkAttachmentReference colorAttachmentResolveRef =
+        {
+            attachment : 2,
+            layout : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        };
+
         const VkSubpassDescription subpass =
         {
             // Use for graphics.
@@ -1164,6 +1182,8 @@ if(from!"std.typecons".isTuple!T
             // Index in this array referenced from the fragment shader layout(location=0) out vec4 outColor directive.
             pColorAttachments : &colorAttachmentRef,
             pDepthStencilAttachment : &depthAttachmentRef,
+            // It is enough to let the render pass define a multisample resolve.
+            pResolveAttachments : &colorAttachmentResolveRef
         };
 
         const VkSubpassDependency dependency =
@@ -1292,6 +1312,7 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
 )
@@ -1394,7 +1415,7 @@ if(from!"std.typecons".isTuple!T
                     const VkPipelineMultisampleStateCreateInfo multisampling =
                     {
                         sampleShadingEnable : VK_FALSE,
-                        rasterizationSamples : VK_SAMPLE_COUNT_1_BIT,
+                        rasterizationSamples : res.msaaSamples,
                         minSampleShading : 1.0f, // Optional
                         pSampleMask : null, // Optional
                         alphaToCoverageEnable : VK_FALSE, // Optional
@@ -1698,6 +1719,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.colorImageView) : from!"erupted".VkImageView)
     && is(typeof(arg.depthImageView) : from!"erupted".VkImageView)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
 )
@@ -1717,10 +1739,11 @@ if(from!"std.typecons".isTuple!T
 
     foreach (i, ref imageView; res.swapChainImageViews[].enumerate)
     {
-        const VkImageView[2] attachments =
+        const VkImageView[3] attachments =
         [
-            imageView,
+            res.colorImageView,
             res.depthImageView,
+            imageView,
         ];
 
         const VkFramebufferCreateInfo framebufferInfo =
