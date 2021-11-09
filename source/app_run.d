@@ -657,6 +657,40 @@ bool checkDeviceExtensionSupport(from!"erupted".VkPhysicalDevice device) nothrow
     return true;
 }
 
+from!"erupted".VkSampleCountFlagBits getMaxUsableSampleCount(
+    from!"erupted".VkPhysicalDevice physicalDevice,
+) nothrow @nogc @trusted
+{
+    import erupted;
+
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+    const VkSampleCountFlags counts =
+        properties.limits.framebufferColorSampleCounts &
+        properties.limits.framebufferDepthSampleCounts;
+    if(counts & VK_SAMPLE_COUNT_64_BIT)
+    {
+        return VK_SAMPLE_COUNT_64_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_32_BIT)
+    {
+        return VK_SAMPLE_COUNT_32_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_16_BIT)
+    {
+        return VK_SAMPLE_COUNT_16_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_4_BIT)
+    {
+        return VK_SAMPLE_COUNT_4_BIT;
+    }
+    if(counts & VK_SAMPLE_COUNT_2_BIT)
+    {
+        return VK_SAMPLE_COUNT_2_BIT;
+    }
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
 auto ref pickPhysicalDevice(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.instance) : from!"erupted".VkInstance)
@@ -675,6 +709,7 @@ if(from!"std.typecons".isTuple!T
         VkPhysicalDevice, "physicalDevice",
         QueueFamilyIndices, "queueFamilyIndices",
         ChosenSwapChainSupport, "chosenSwapChainSupport",
+        VkSampleCountFlagBits, "msaaSamples",
         ));
     auto res = partialConstruct!Res(forward!arg);
     
@@ -695,6 +730,8 @@ if(from!"std.typecons".isTuple!T
         .map!((elem)
         {
             elem[1].physicalDevice = elem[0];
+            // TODO: get msaa samples at later stage (after checks).
+            elem[1].msaaSamples = getMaxUsableSampleCount(elem[1].physicalDevice);
             VkPhysicalDeviceFeatures supportedFeatures;
             vkGetPhysicalDeviceFeatures(elem[1].physicalDevice, &supportedFeatures);
             if(!supportedFeatures.samplerAnisotropy)
@@ -760,6 +797,8 @@ if(from!"std.typecons".isTuple!T
     const VkPhysicalDeviceFeatures deviceFeatures =
     {
         samplerAnisotropy : VK_TRUE,
+        // For anti-aliasing of geometry interior (MSAA only smooth the edges).
+        sampleRateShading : VK_TRUE,
     };
 
     VkDeviceCreateInfo createInfo =
@@ -842,6 +881,7 @@ if(from!"std.typecons".isTuple!T
         .andThen!createSwapChainImageViews
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
+        .andThen!createColorResources
         .andThen!createDepthResources
         .andThen!createFramebuffers
         .andThen!createUniformBuffers
@@ -1066,6 +1106,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
 )
 {
     import util;
@@ -1080,23 +1121,23 @@ if(from!"std.typecons".isTuple!T
         ));
         auto res = partialConstruct!Res(forward!arg);
 
-        const VkAttachmentDescription[2] attachments =
+        const VkAttachmentDescription[3] attachments =
         [
             {
                 // colorAttachment
                 format : res.swapChainImageFormat,
-                samples : VK_SAMPLE_COUNT_1_BIT,
+                samples : res.msaaSamples,
                 loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
                 storeOp : VK_ATTACHMENT_STORE_OP_STORE,
                 stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                 stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
                 initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
-                finalLayout : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
+                finalLayout : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             },
             {
                 // depthAttachment
                 format : depthFormat,
-                samples : VK_SAMPLE_COUNT_1_BIT,
+                samples : res.msaaSamples,
                 loadOp : VK_ATTACHMENT_LOAD_OP_CLEAR,
                 storeOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
                 stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -1104,6 +1145,17 @@ if(from!"std.typecons".isTuple!T
                 initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
                 finalLayout : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             },
+            {
+                // colorAttachmentResolve
+                format : res.swapChainImageFormat,
+                samples : VK_SAMPLE_COUNT_1_BIT,
+                loadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                storeOp : VK_ATTACHMENT_STORE_OP_STORE,
+                stencilLoadOp : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                stencilStoreOp : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                initialLayout : VK_IMAGE_LAYOUT_UNDEFINED,
+                finalLayout : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Image to be presented in the swap chain.
+            }
         ];
 
         const VkAttachmentReference colorAttachmentRef =
@@ -1118,6 +1170,12 @@ if(from!"std.typecons".isTuple!T
             layout : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         };
 
+        const VkAttachmentReference colorAttachmentResolveRef =
+        {
+            attachment : 2,
+            layout : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        };
+
         const VkSubpassDescription subpass =
         {
             // Use for graphics.
@@ -1126,6 +1184,8 @@ if(from!"std.typecons".isTuple!T
             // Index in this array referenced from the fragment shader layout(location=0) out vec4 outColor directive.
             pColorAttachments : &colorAttachmentRef,
             pDepthStencilAttachment : &depthAttachmentRef,
+            // It is enough to let the render pass define a multisample resolve.
+            pResolveAttachments : &colorAttachmentResolveRef
         };
 
         const VkSubpassDependency dependency =
@@ -1254,6 +1314,7 @@ auto ref createGraphicsPipeline(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.descriptorSetLayout) : from!"erupted".VkDescriptorSetLayout)
 )
@@ -1355,9 +1416,11 @@ if(from!"std.typecons".isTuple!T
                     // Multisampling requires a GPU feature.
                     const VkPipelineMultisampleStateCreateInfo multisampling =
                     {
-                        sampleShadingEnable : VK_FALSE,
-                        rasterizationSamples : VK_SAMPLE_COUNT_1_BIT,
-                        minSampleShading : 1.0f, // Optional
+                        // Anti-aliasing for geometry interior (MSAA smooth only the edges).
+                        sampleShadingEnable : VK_TRUE,
+                        // Min factor for sample shading; closer to on is smoother.
+                        minSampleShading : 0.2f,
+                        rasterizationSamples : res.msaaSamples,
                         pSampleMask : null, // Optional
                         alphaToCoverageEnable : VK_FALSE, // Optional
                         alphaToOneEnable : VK_FALSE, // Optional
@@ -1478,6 +1541,62 @@ if(from!"std.typecons".isTuple!T
         });
 }
 
+auto createColorResources(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
+    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
+    && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+
+    VkImage colorImage;
+    VkDeviceMemory colorImageMemory;
+
+    const VkFormat colorFormat = arg.swapChainImageFormat;
+    const extent = arg.swapChainExtent;
+    const VkSampleCountFlagBits msaaSamples = arg.msaaSamples;
+
+    return createImage(
+        forward!arg,
+        extent.width, extent.height,
+        1,
+        msaaSamples,
+        colorFormat,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        colorImage,
+        colorImageMemory,
+    )
+    .andThen!((auto ref arg)
+    {
+        return createImageView(arg.device, colorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1)
+        .andThen!((colorImageView, auto ref arg)
+        {
+            alias Res = TupleCat!(T, Tuple!(
+                VkImage, "colorImage",
+                VkDeviceMemory, "colorImageMemory",
+                VkImageView, "colorImageView",
+            ));
+            auto res = partialConstruct!Res(forward!arg);
+
+            res.colorImage = colorImage.move;
+            res.colorImageMemory = colorImageMemory.move;
+            res.colorImageView = colorImageView.move;
+
+            return ok(res.move);
+        })(forward!arg)
+        ;
+    })
+    ;
+}
+
 from!"expected".Expected!(from!"erupted".VkFormat) findSupportedFormat(VkFormatRange)(
     from!"erupted".VkPhysicalDevice physicalDevice,
     from!"erupted".VkImageTiling tiling,
@@ -1539,6 +1658,7 @@ auto ref createDepthResources(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
 )
@@ -1554,10 +1674,12 @@ if(from!"std.typecons".isTuple!T
     .andThen!((auto ref depthFormat, auto ref arg)
     {
         auto extent = arg.swapChainExtent;
+        auto msaaSamples = arg.msaaSamples;
         return createImage(
             forward!arg,
             extent.width, extent.height,
             1,
+            msaaSamples,
             depthFormat,
             VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -1601,6 +1723,7 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.colorImageView) : from!"erupted".VkImageView)
     && is(typeof(arg.depthImageView) : from!"erupted".VkImageView)
     && is(from!"std.range".ElementType!(typeof(arg.swapChainImageViews[])) : from!"erupted".VkImageView)
 )
@@ -1620,10 +1743,11 @@ if(from!"std.typecons".isTuple!T
 
     foreach (i, ref imageView; res.swapChainImageViews[].enumerate)
     {
-        const VkImageView[2] attachments =
+        const VkImageView[3] attachments =
         [
-            imageView,
+            res.colorImageView,
             res.depthImageView,
+            imageView,
         ];
 
         const VkFramebufferCreateInfo framebufferInfo =
@@ -1751,6 +1875,7 @@ auto createImage(T)(
     auto ref T arg,
     in uint width, in uint height,
     in uint mipLevels,
+    in from!"erupted".VkSampleCountFlagBits numSamples,
     in from!"erupted".VkFormat format,
     in from!"erupted".VkImageTiling tiling,
     in from!"erupted".VkImageUsageFlags usage,
@@ -1794,7 +1919,7 @@ if(from!"std.typecons".isTuple!T
             // Image will be used by one queue family.
             sharingMode : VK_SHARING_MODE_EXCLUSIVE,
             // Multisampling relevant for attachment images.
-            samples : VK_SAMPLE_COUNT_1_BIT,
+            samples : numSamples,
             // Flags can specify that image is sparce.
             flags : 0,
         };
@@ -2171,8 +2296,9 @@ if(from!"std.typecons".isTuple!T
         return ok(forward!arg);
     })
     .andThen!createImage(
-        image.w, image.h,
+        textureWidth, textureHeight,
         mipLevels,
+        VK_SAMPLE_COUNT_1_BIT,
         VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT // Sampled - for usage in shaders.
@@ -3225,6 +3351,9 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(typeof(arg.colorImage) : from!"erupted".VkImage)
+    && is(typeof(arg.colorImageMemory) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.colorImageView) : from!"erupted".VkImageView)
     && is(typeof(arg.depthImage) : from!"erupted".VkImage)
     && is(typeof(arg.depthImageMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.depthImageView) : from!"erupted".VkImageView)
@@ -3265,6 +3394,10 @@ if(from!"std.typecons".isTuple!T
     vkDestroyImageView(arg.device, arg.depthImageView, null);
     vkDestroyImage(arg.device, arg.depthImage, null);
     vkFreeMemory(arg.device, arg.depthImageMemory, null);
+    
+    vkDestroyImageView(arg.device, arg.colorImageView, null);
+    vkDestroyImage(arg.device, arg.colorImage, null);
+    vkFreeMemory(arg.device, arg.colorImageMemory, null);
 
     vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
     vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
@@ -3286,6 +3419,9 @@ if(from!"std.typecons".isTuple!T
         "renderPass",
         "pipelineLayout",
         "graphicsPipeline",
+        "colorImage",
+        "colorImageMemory",
+        "colorImageView",
         "depthImage",
         "depthImageMemory",
         "depthImageView",
