@@ -879,6 +879,7 @@ if(from!"std.typecons".isTuple!T
         .andThen!createSwapChainImageViews
         .andThen!createRenderPass
         .andThen!createGraphicsPipeline
+        .andThen!createColorResources
         .andThen!createDepthResources
         .andThen!createFramebuffers
         .andThen!createUniformBuffers
@@ -1515,6 +1516,62 @@ if(from!"std.typecons".isTuple!T
         });
 }
 
+auto createColorResources(T)(auto ref T arg) nothrow @nogc @trusted
+if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
+    && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.swapChainImageFormat) : from!"erupted".VkFormat)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
+    && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
+    && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
+)
+{
+    import util;
+    import erupted;
+    import expected : ok, err, andThen;
+
+    VkImage colorImage;
+    VkDeviceMemory colorImageMemory;
+
+    const VkFormat colorFormat = arg.swapChainImageFormat;
+    const extent = arg.swapChainExtent;
+    const VkSampleCountFlagBits msaaSamples = arg.msaaSamples;
+
+    return createImage(
+        forward!arg,
+        extent.width, extent.height,
+        1,
+        msaaSamples,
+        colorFormat,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        colorImage,
+        colorImageMemory,
+    )
+    .andThen!((auto ref arg)
+    {
+        return createImageView(arg.device, colorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1)
+        .andThen!((colorImageView, auto ref arg)
+        {
+            alias Res = TupleCat!(T, Tuple!(
+                VkImage, "colorImage",
+                VkDeviceMemory, "colorImageMemory",
+                VkImageView, "colorImageView",
+            ));
+            auto res = partialConstruct!Res(forward!arg);
+
+            res.colorImage = colorImage.move;
+            res.colorImageMemory = colorImageMemory.move;
+            res.colorImageView = colorImageView.move;
+
+            return ok(res.move);
+        })(forward!arg)
+        ;
+    })
+    ;
+}
+
 from!"expected".Expected!(from!"erupted".VkFormat) findSupportedFormat(VkFormatRange)(
     from!"erupted".VkPhysicalDevice physicalDevice,
     from!"erupted".VkImageTiling tiling,
@@ -1576,6 +1633,7 @@ auto ref createDepthResources(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
     && is(typeof(arg.swapChainExtent) : from!"erupted".VkExtent2D)
+    && is(typeof(arg.msaaSamples) : from!"erupted".VkSampleCountFlagBits)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
 )
@@ -1591,11 +1649,12 @@ if(from!"std.typecons".isTuple!T
     .andThen!((auto ref depthFormat, auto ref arg)
     {
         auto extent = arg.swapChainExtent;
+        auto msaaSamples = arg.msaaSamples;
         return createImage(
             forward!arg,
             extent.width, extent.height,
             1,
-            VK_SAMPLE_COUNT_1_BIT,
+            msaaSamples,
             depthFormat,
             VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -3265,6 +3324,9 @@ if(from!"std.typecons".isTuple!T
     && is(typeof(arg.renderPass) : from!"erupted".VkRenderPass)
     && is(typeof(arg.pipelineLayout) : from!"erupted".VkPipelineLayout)
     && is(typeof(arg.graphicsPipeline) : from!"erupted".VkPipeline)
+    && is(typeof(arg.colorImage) : from!"erupted".VkImage)
+    && is(typeof(arg.colorImageMemory) : from!"erupted".VkDeviceMemory)
+    && is(typeof(arg.colorImageView) : from!"erupted".VkImageView)
     && is(typeof(arg.depthImage) : from!"erupted".VkImage)
     && is(typeof(arg.depthImageMemory) : from!"erupted".VkDeviceMemory)
     && is(typeof(arg.depthImageView) : from!"erupted".VkImageView)
@@ -3305,6 +3367,10 @@ if(from!"std.typecons".isTuple!T
     vkDestroyImageView(arg.device, arg.depthImageView, null);
     vkDestroyImage(arg.device, arg.depthImage, null);
     vkFreeMemory(arg.device, arg.depthImageMemory, null);
+    
+    vkDestroyImageView(arg.device, arg.colorImageView, null);
+    vkDestroyImage(arg.device, arg.colorImage, null);
+    vkFreeMemory(arg.device, arg.colorImageMemory, null);
 
     vkDestroyPipeline(arg.device, arg.graphicsPipeline, null);
     vkDestroyPipelineLayout(arg.device, arg.pipelineLayout, null);
@@ -3326,6 +3392,9 @@ if(from!"std.typecons".isTuple!T
         "renderPass",
         "pipelineLayout",
         "graphicsPipeline",
+        "colorImage",
+        "colorImageMemory",
+        "colorImageView",
         "depthImage",
         "depthImageMemory",
         "depthImageView",
