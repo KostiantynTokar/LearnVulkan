@@ -1595,6 +1595,7 @@ if(from!"std.typecons".isTuple!T
             forward!arg,
             extent.width, extent.height,
             1,
+            VK_SAMPLE_COUNT_1_BIT,
             depthFormat,
             VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -1788,6 +1789,7 @@ auto createImage(T)(
     auto ref T arg,
     in uint width, in uint height,
     in uint mipLevels,
+    in from!"erupted".VkSampleCountFlagBits numSamples,
     in from!"erupted".VkFormat format,
     in from!"erupted".VkImageTiling tiling,
     in from!"erupted".VkImageUsageFlags usage,
@@ -1831,7 +1833,7 @@ if(from!"std.typecons".isTuple!T
             // Image will be used by one queue family.
             sharingMode : VK_SHARING_MODE_EXCLUSIVE,
             // Multisampling relevant for attachment images.
-            samples : VK_SAMPLE_COUNT_1_BIT,
+            samples : numSamples,
             // Flags can specify that image is sparce.
             flags : 0,
         };
@@ -2208,8 +2210,9 @@ if(from!"std.typecons".isTuple!T
         return ok(forward!arg);
     })
     .andThen!createImage(
-        image.w, image.h,
+        textureWidth, textureHeight,
         mipLevels,
+        VK_SAMPLE_COUNT_1_BIT,
         VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT // Sampled - for usage in shaders.
