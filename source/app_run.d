@@ -957,6 +957,7 @@ if(from!"std.range".isInputRange!Range
     && is(typeof(from!"std.range".ElementType!Range.init[0]) : from!"erupted".VkImage)
     && is(typeof(from!"std.range".ElementType!Range.init[1]) : from!"erupted".VkFormat)
     && is(typeof(from!"std.range".ElementType!Range.init[2]) : from!"erupted".VkImageAspectFlags)
+    && is(typeof(from!"std.range".ElementType!Range.init[3]) : uint) // mipLevels
 )
 {
     import std.range : zip, repeat;
@@ -983,7 +984,7 @@ if(from!"std.range".isInputRange!Range
             {
                 aspectMask : elem[1][2],
                 baseMipLevel : 0,
-                levelCount : 1,
+                levelCount : elem[1][3],
                 baseArrayLayer : 0,
                 // More then 1 for stereographic 3D application.
                 layerCount : 1,
@@ -1003,11 +1004,12 @@ auto createImageView(
     from!"erupted".VkImage image,
     from!"erupted".VkFormat format,
     from!"erupted".VkImageAspectFlags aspectFlags,
+    in uint mipLevels,
 )
 {
     import std.typecons : tuple;
     import std.range : only;
-    return createImageViews(device, only(tuple(image, format, aspectFlags))).front;
+    return createImageViews(device, only(tuple(image, format, aspectFlags, mipLevels))).front;
 }
 
 auto ref createSwapChainImageViews(T)(auto ref T arg) nothrow @nogc @trusted
@@ -1037,6 +1039,7 @@ if(from!"std.typecons".isTuple!T
             res.swapChainImages[],
             res.swapChainImageFormat.repeat(res.swapChainImages.length),
             VK_IMAGE_ASPECT_COLOR_BIT.repeat(res.swapChainImages.length),
+            1U.repeat(res.swapChainImages.length),
         )
     )
     .enumerate
@@ -1554,6 +1557,7 @@ if(from!"std.typecons".isTuple!T
         return createImage(
             forward!arg,
             extent.width, extent.height,
+            1,
             depthFormat,
             VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -1563,7 +1567,7 @@ if(from!"std.typecons".isTuple!T
         )
         .andThen!((auto ref arg)
         {
-            return createImageView(arg.device, depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT)
+            return createImageView(arg.device, depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
             .andThen!((auto ref depthImageView)
             {
                 alias Res = TupleCat!(T, Tuple!(
@@ -1580,7 +1584,8 @@ if(from!"std.typecons".isTuple!T
                     res.device, res.commandPool, res.graphicsQueue,
                     res.depthImage, depthFormat,
                     VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    1,
                 );
                 return ok(res);
             })
@@ -1745,6 +1750,7 @@ if(from!"std.typecons".isTuple!T
 auto createImage(T)(
     auto ref T arg,
     in uint width, in uint height,
+    in uint mipLevels,
     in from!"erupted".VkFormat format,
     in from!"erupted".VkImageTiling tiling,
     in from!"erupted".VkImageUsageFlags usage,
@@ -1774,7 +1780,7 @@ if(from!"std.typecons".isTuple!T
                 height : height,
                 depth : 1,
             },
-            mipLevels : 1,
+            mipLevels : mipLevels,
             arrayLayers : 1,
             // I.e., VK_FORMAT_R8G8B8A8_SRGB.
             format : format,
@@ -1834,6 +1840,7 @@ void transitionImageLayout(
     from!"erupted".VkFormat format,
     from!"erupted".VkImageLayout oldLayout,
     from!"erupted".VkImageLayout newLayout,
+    in uint mipLevels,
 ) nothrow @nogc @trusted
 {
     import erupted;
@@ -1852,7 +1859,7 @@ void transitionImageLayout(
         subresourceRange :
         {
             baseMipLevel : 0,
-            levelCount : 1,
+            levelCount : mipLevels,
             baseArrayLayer : 0,
             layerCount : 1,
         },
@@ -1960,8 +1967,154 @@ void copyBufferToImage(
     endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
 }
 
+from!"expected".Expected!void generateMipmaps(
+    from!"erupted".VkPhysicalDevice physicalDevice,
+    from!"erupted".VkDevice device,
+    from!"erupted".VkCommandPool commandPool,
+    from!"erupted".VkQueue transferQueue,
+    from!"erupted".VkImage image,
+    from!"erupted".VkFormat imageFormat,
+    in uint textureWidth, in uint textureHeight,
+    in uint mipLevels,
+) nothrow @nogc @trusted 
+{
+    import erupted;
+    import expected : ok, err;
+
+    // TODO: vkGetPhysicalDeviceFormatProperties is already called somewhere previously. Do not repeat.
+    VkFormatProperties formatProperties;
+    vkGetPhysicalDeviceFormatProperties(physicalDevice, imageFormat, &formatProperties);
+    if(!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT))
+    {
+        // In this case it is possible to find image format that supports blitting,
+        // or generate mipmaps on CPU and load them to GPU separately.
+        // Usually all texture mipmaps are pregenerated and stored in one file.
+        return err!void("Image format does not support linear blitting, unable to generate mipmaps.");
+    }
+
+    auto commandBuffer = beginSingleTimeCommands(device, commandPool);
+
+    VkImageMemoryBarrier barrier =
+    {
+        image : image,
+        srcQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex : VK_QUEUE_FAMILY_IGNORED,
+        subresourceRange :
+        {
+            aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+            baseArrayLayer : 0,
+            layerCount : 1,
+            levelCount : 1,
+        },
+    };
+
+    uint mipWidth = textureWidth;
+    uint mipHeight = textureHeight;
+
+    foreach(uint i; 1 .. mipLevels)
+    {
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+        // Barrier to wait on previous transition and on vkCmdCopyBufferToImage.
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, null,
+            0, null,
+            1, &barrier,
+        );
+
+        const VkImageBlit blit =
+        {
+            srcOffsets :
+            [
+                { 0, 0, 0 },
+                { mipWidth, mipHeight, 1 }
+            ],
+            srcSubresource :
+            {
+                aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+                mipLevel : i - 1,
+                baseArrayLayer : 0,
+                layerCount : 1,
+            },
+            dstOffsets :
+            [
+                { 0, 0, 0 },
+                { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1 },
+            ],
+            dstSubresource :
+            {
+                aspectMask : VK_IMAGE_ASPECT_COLOR_BIT,
+                mipLevel : i,
+                baseArrayLayer : 0,
+                layerCount : 1,
+            },
+        };
+
+        vkCmdBlitImage(
+            commandBuffer,
+            image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, // Need to specify current leyout of the image.
+            image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &blit,
+            VK_FILTER_LINEAR,
+        );
+
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,
+            0, null,
+            0, null,
+            1, &barrier,
+        );
+
+        if(mipWidth > 1)
+        {
+            mipWidth /= 2;
+        }
+        if(mipHeight > 1)
+        {
+            mipHeight /= 2;
+        }
+    }
+
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, null,
+        0, null,
+        1, &barrier,
+    );
+
+    endSingleTimeCommands(device, commandPool, transferQueue, commandBuffer);
+
+    return ok();
+}
+
 auto createTextureImage(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
+    && is(typeof(arg.physicalDevice) : from!"erupted".VkPhysicalDevice)
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.commandPool) : from!"erupted".VkCommandPool)
     && is(typeof(arg.graphicsQueue) : from!"erupted".VkQueue)
@@ -1976,6 +2129,7 @@ if(from!"std.typecons".isTuple!T
     VkDeviceSize imageSize;
     uint textureWidth;
     uint textureHeight;
+    uint mipLevels;
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
     VkImage textureImage;
@@ -1983,6 +2137,8 @@ if(from!"std.typecons".isTuple!T
 
     return (auto ref arg)
     {
+        import std.math : log2, floor;
+        import std.algorithm : max;
         image = read_image(TexturePath, 4);
         if(image.e)
         {
@@ -1991,6 +2147,7 @@ if(from!"std.typecons".isTuple!T
         textureWidth = image.w;
         textureHeight = image.h;
         imageSize = image.w * image.h * image.c;
+        mipLevels = cast(uint) max(textureWidth, textureHeight).log2.floor;
         return ok(forward!arg);
         // TODO: free image on error.
     }(forward!arg)
@@ -2015,9 +2172,11 @@ if(from!"std.typecons".isTuple!T
     })
     .andThen!createImage(
         image.w, image.h,
+        mipLevels,
         VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // Sampled - for usage in shaders.
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT // Sampled - for usage in shaders.
+        | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, // For blitting in mipmap generation.
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         textureImage,
         textureImageMemory,
@@ -2027,18 +2186,21 @@ if(from!"std.typecons".isTuple!T
         alias Res = TupleCat!(T, Tuple!(
             VkImage, "textureImage",
             VkDeviceMemory, "textureImageMemory",
+            uint, "mipLevels"
         ));
         auto res = partialConstruct!Res(forward!arg);
         res.textureImage = textureImage.move;
         res.textureImageMemory = textureImageMemory.move;
+        res.mipLevels = mipLevels.move;
 
-        // TODO: create setupCommandBuffer and flushCommandBuffer functions instead of creating 3 independent command buffers.
+        // TODO: create setupCommandBuffer and flushCommandBuffer functions instead of creating multiple independent command buffers.
         transitionImageLayout(
             res.device, res.commandPool, res.graphicsQueue,
             res.textureImage,
             VK_FORMAT_R8G8B8A8_SRGB,
             VK_IMAGE_LAYOUT_UNDEFINED, // Image was created with undefined layout.
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            res.mipLevels,
         );
 
         copyBufferToImage(
@@ -2048,16 +2210,22 @@ if(from!"std.typecons".isTuple!T
             textureWidth, textureHeight,
         );
 
-        transitionImageLayout(
+        vkDestroyBuffer(res.device, stagingBuffer, null);
+        vkFreeMemory(res.device, stagingBufferMemory, null);
+
+        // Image transfered to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL in generateMipmaps.
+        auto exp = generateMipmaps(
+            res.physicalDevice,
             res.device, res.commandPool, res.graphicsQueue,
             res.textureImage,
             VK_FORMAT_R8G8B8A8_SRGB,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            textureWidth, textureHeight,
+            res.mipLevels,
         );
-
-        vkDestroyBuffer(res.device, stagingBuffer, null);
-        vkFreeMemory(res.device, stagingBufferMemory, null);
+        if(exp.hasError)
+        {
+            return err!Res(exp.error);
+        }
         
         return ok(res.move);
     })
@@ -2068,6 +2236,7 @@ auto createTextureImageView(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
     && is(typeof(arg.textureImage) : from!"erupted".VkImage)
+    && is(typeof(arg.mipLevels) : uint)
 )
 {
     import util;
@@ -2079,7 +2248,7 @@ if(from!"std.typecons".isTuple!T
     ));
     auto res = partialConstruct!Res(forward!arg);
 
-    return createImageView(res.device, res.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT)
+    return createImageView(res.device, res.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, res.mipLevels)
     .mapOrElse!(
         (imageView)
         {
@@ -2121,6 +2290,7 @@ from!"erupted".VkCommandBuffer beginSingleTimeCommands(
 auto createTextureSampler(T)(auto ref T arg) nothrow @nogc @trusted
 if(from!"std.typecons".isTuple!T
     && is(typeof(arg.device) : from!"erupted".VkDevice)
+    && is(typeof(arg.mipLevels) : uint)
 )
 {
     import util;
@@ -2158,9 +2328,12 @@ if(from!"std.typecons".isTuple!T
         compareEnable : VK_FALSE,
         compareOp : VK_COMPARE_OP_ALWAYS,
         mipmapMode : VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        // Lod (level of detail) is calculated from screen size, then mipLodBias is added (result can be negative).
+        // If lod is negative, then magnifying filter is used, and minifying filter otherwise.
         mipLodBias : 0.0f,
+        // Then lod is clamped to [minLod, maxLod]. Mip level is a floot(lod), clamped to [0, texture.mipLevels].
         minLod : 0.0f,
-        maxLod : 0.0f,
+        maxLod : cast(float) res.mipLevels,
     };
 
     return vkCreateSampler(res.device, &sampelrInfo, null, &res.textureSampler) == VK_SUCCESS
